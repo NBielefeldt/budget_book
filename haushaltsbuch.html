@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ausgaben-Auswertung</title>
+<style>
+  :root {
+    --bg: #f5f4f0;
+    --surface: #ffffff;
+    --border: rgba(0,0,0,0.1);
+    --text: #1a1a18;
+    --muted: #6b6b66;
+    --accent: #185fa5;
+    --accent-light: #e6f1fb;
+    --success: #0f6e56;
+    --success-light: #e1f5ee;
+    --danger: #993c1d;
+    --danger-light: #faece7;
+    --amber: #ba7517;
+    --amber-light: #faeeda;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1a; --surface: #262624; --border: rgba(255,255,255,0.12);
+      --text: #eeede8; --muted: #9b9b94; --accent: #85b7eb; --accent-light: #042c53;
+      --success-light: #04342c; --success: #5dcaa5; --danger-light: #4a1b0c;
+      --danger: #f0997b; --amber: #ef9f27; --amber-light: #412402;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui,-apple-system,sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 1.25rem 2rem; display: flex; align-items: baseline; gap: 1rem; }
+  header h1 { font-family: Georgia,serif; font-size: 1.4rem; font-weight: normal; letter-spacing: -0.02em; }
+  header span { font-size: 0.8rem; color: var(--muted); }
+  main { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+
+  .drop-zone { border: 1.5px dashed var(--border); border-radius: 12px; background: var(--surface); padding: 3rem 2rem; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; }
+  .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-light); }
+  .drop-zone input { display: none; }
+  .drop-zone svg { color: var(--muted); margin-bottom: 1rem; }
+  .drop-zone strong { display: block; font-size: 1rem; margin-bottom: 0.25rem; }
+  .drop-zone p { color: var(--muted); font-size: 0.85rem; margin-top: 0.5rem; }
+  .file-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; justify-content: center; }
+  .file-tag { background: var(--success-light); color: var(--success); border-radius: 20px; padding: 3px 10px; font-size: 0.75rem; }
+
+  .config-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin-top: 1.5rem; }
+  .config-section h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 1rem; }
+
+  .categories-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 0.75rem; }
+  .cat-rule { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.8rem; font-size: 0.8rem; }
+  .cat-rule .name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .cat-rule input[type=text] { background: transparent; border: none; border-bottom: 1px solid var(--border); color: var(--text); font-size: 0.8rem; padding: 0.2rem 0; font-family: inherit; width: 100%; }
+  .cat-rule input[type=text]:focus { outline: none; border-bottom-color: var(--accent); }
+  .cat-rule .kw-in { color: var(--muted); font-size: 0.75rem; }
+  .del-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1.1rem; line-height: 1; padding: 0; margin-left: auto; flex-shrink: 0; }
+  .del-btn:hover { color: var(--danger); }
+  .add-btn { background: var(--accent-light); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; cursor: pointer; font-family: inherit; margin-top: 0.75rem; }
+
+  .run-btn { display: block; margin: 1.5rem 0 0; background: var(--text); color: var(--bg); border: none; border-radius: 8px; padding: 0.7rem 2rem; font-size: 0.95rem; font-family: inherit; cursor: pointer; transition: opacity 0.15s; }
+  .run-btn:hover { opacity: 0.85; }
+  .run-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  #report { margin-top: 2rem; }
+  .month-block { margin-bottom: 2.5rem; }
+  .month-title { font-family: Georgia,serif; font-size: 1.2rem; font-weight: normal; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; margin-bottom: 1.25rem; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1rem; }
+  .stat-card .lbl { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.3rem; }
+  .stat-card .val { font-size: 1.2rem; font-weight: 500; }
+  .stat-card.exp .val { color: var(--danger); }
+  .stat-card.inc .val { color: var(--success); }
+  .cat-bars { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; }
+  .bar-row { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem; font-size: 0.85rem; }
+  .cat-name { min-width: 120px; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-wrap { flex: 1; background: var(--bg); border-radius: 4px; height: 8px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+  .amount { min-width: 85px; text-align: right; color: var(--muted); font-size: 0.82rem; }
+  .tx-toggle { font-size: 0.8rem; color: var(--accent); cursor: pointer; background: none; border: none; padding: 0.4rem 0; margin-top: 0.75rem; font-family: inherit; }
+  .tx-toggle:hover { text-decoration: underline; }
+  .filter-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 0.75rem; }
+  .filter-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; cursor: pointer; border: 1px solid transparent; background: var(--bg); color: var(--muted); transition: all 0.15s; user-select: none; }
+  .filter-chip:hover { border-color: var(--border); color: var(--text); }
+  .filter-chip.active { color: #fff; border-color: transparent; }
+  .filter-chip .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .filter-chip.chip-all { background: var(--text); color: var(--bg); border-color: transparent; }
+  .filter-chip.chip-all.inactive { background: var(--bg); color: var(--muted); border-color: var(--border); }
+  .filter-summary { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.5rem; min-height: 1.2em; }
+  .tx-wrap { margin-top: 0.75rem; overflow-x: auto; }
+  .tx-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .tx-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .tx-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .tx-table td:last-child { text-align: right; white-space: nowrap; }
+  .tx-table tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 20px; font-size: 0.7rem; }
+  .overview-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 2rem; }
+  .overview-card h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin-bottom: 1rem; }
+  .export-btn { background: var(--success-light); color: var(--success); border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.8rem; font-size: 0.8rem; cursor: pointer; font-family: inherit; }
+  .exclude-box { background: var(--danger-light); border: 1px solid rgba(153,60,29,0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 1rem; }
+  .exclude-box label { font-size: 0.8rem; color: var(--danger); font-weight: 500; display: block; margin-bottom: 0.4rem; }
+  .exclude-box input { width: 100%; background: transparent; border: none; border-bottom: 1px solid rgba(153,60,29,0.3); color: var(--text); font-size: 0.8rem; padding: 0.2rem 0; font-family: inherit; }
+  .exclude-box input:focus { outline: none; border-bottom-color: var(--danger); }
+  .exclude-box p { font-size: 0.75rem; color: var(--muted); margin-top: 0.4rem; }
+  .total-overview { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 2rem; }
+  .total-overview h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin-bottom: 1rem; }
+  .total-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 1rem; }
+  .total-table th { text-align: left; color: var(--muted); font-weight: 400; padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 0.78rem; }
+  .total-table th:not(:first-child) { text-align: right; }
+  .total-table td { padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border); }
+  .total-table td:not(:first-child) { text-align: right; color: var(--muted); font-size: 0.82rem; white-space: nowrap; }
+  .total-table td.cat-cell { display: flex; align-items: center; gap: 7px; }
+  .total-table tr:last-child td { border-bottom: none; font-weight: 500; color: var(--text); }
+  .total-table tr:last-child td:not(:first-child) { color: var(--danger); }
+  .total-table .highlight { color: var(--text) !important; font-weight: 500; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ausgaben-Auswertung</h1>
+  <span>Volksbank · ING · Sparkasse · Lokale Verarbeitung · Keine Daten verlassen den Browser</span>
+</header>
+<main>
+
+<div class="drop-zone" id="dropZone">
+  <input type="file" id="fileInput" accept=".csv" multiple>
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>
+  <strong>CSV-Dateien hier ablegen oder klicken</strong>
+  <p>Volksbank, ING, Sparkasse und weitere Formate &middot; Mehrere Dateien auf einmal möglich</p>
+  <div class="file-tags" id="fileTags"></div>
+</div>
+
+<div id="dbStatus" style="align-items:center;gap:0.6rem;margin-top:0.75rem;padding:0.5rem 0.85rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.8rem;color:var(--muted);display:flex"></div>
+
+<div class="config-section">
+  <h2>Kategorien &amp; Schlüsselwörter</h2>
+  <p style="font-size:0.8rem;color:var(--muted);margin-bottom:1rem">Komma-getrennte Schlüsselwörter &middot; Groß/Kleinschreibung egal &middot; Erste Übereinstimmung gewinnt &middot; Letzte Kategorie = Fallback</p>
+  <div class="categories-grid" id="catGrid"></div>
+  <button class="add-btn" onclick="addCat()">+ Ausgaben-Kategorie</button>
+  <div class="exclude-box">
+    <label>&#8856; Ausschluss-Schlüsselwörter</label>
+    <input type="text" id="excludeKw" placeholder="umbuchung, intern, übertrag, dz bank, volksbank plus, …" oninput="saveExclude()">
+    <p>Transaktionen mit diesen Begriffen werden komplett ignoriert (Umbuchungen, interne Transfers, …)</p>
+  </div>
+</div>
+
+<div class="config-section" style="margin-top:1rem;border-color:rgba(15,110,86,0.3)">
+  <h2 style="color:var(--success)">Einnahmen-Kategorien</h2>
+  <p style="font-size:0.8rem;color:var(--muted);margin-bottom:1rem">Klassifiziert eingehende Buchungen &middot; Letzte Kategorie = Fallback</p>
+  <div class="categories-grid" id="incCatGrid"></div>
+  <button class="add-btn" onclick="addIncCat()" style="background:var(--success-light);color:var(--success)">+ Einnahmen-Kategorie</button>
+</div>
+
+<button class="run-btn" id="runBtn" onclick="runReport()" disabled>Bericht erstellen</button>
+<div id="report"></div>
+
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
+<script>
+const COLORS = ['#185fa5','#0f6e56','#ba7517','#993c1d','#993556','#534ab7','#3b6d11','#854f0b','#72243e','#5f5e5a'];
+
+const DEFAULT_CATS = [
+  { name:'Darlehen',                        kw:'tilgung,darl.-leistung,darlehen' },
+  { name:'Strom & co.',                     kw:'eprimo,stadtwerke,rundfunk,grundsteuer,niederschlagswasser,abwasser,eon,vattenfall,enercity' },
+  { name:'Haus',                            kw:'maler,gröne,handwerker,sanitär,elektriker,dachdecker,renovierung,sanierung' },
+  { name:'Versicherungen & Altersvorsorge', kw:'allianz,provinzial,huk,lvm,generali,signal iduna,oerag,orag,rechtsschutz,berufsunf,investflex' },
+  { name:'Telefon & Internet',              kw:'congstar,greenfiber,telekom,vodafone,o2,1&1,freenet' },
+  { name:'Online und Abos',                 kw:'amazon,amzn,audible,netflix,spotify,microsoft,disney,itunes,adobe,claude.ai,anthropic,steampowered,aliexpress,lidl.de' },
+  { name:'Haus & Garten',                   kw:'toom,sonderpreis baumarkt,jysk,xxxlutz,pflanzen richter,bauhaus,hornbach,obi,ikea,tchibo' },
+  { name:'Supermarkt',                      kw:'marktkauf,penny,lidl,aldi,edeka,netto,kaufland,real,tegut,norma,hol ab,getränkemarkt,getraenkemarkt,reinkoester,sb luening' },
+  { name:'Bäckerei',                        kw:'karlchens,backstube,baeckerei,bäckerei,kamps,karl schmidt' },
+  { name:'Restaurant & Auswärts essen',     kw:'city-burger,burger,taverna,döner,pizza,restaurant,bistro,kantine,lieferando,subway,starbucks,mcdonald,asia fu dong,awa kebab,kebab,sweet n tasty' },
+  { name:'Drogerie',                        kw:'rossmann,dm drogerie,dm-drogerie' },
+  { name:'Apotheken & Gesundheit',          kw:'apotheke,ikk,krankenkasse,arzt,zahnarzt,krankenhaus,physiotherapie,achterberg optik,optiker,hair lounge,salon blue,friseur' },
+  { name:'Kleidung',                        kw:'ernsting,zalando,h&m,zara,c&a,primark,deichmann,kik,abc schuhe,modeh,zakkes' },
+  { name:'Freizeit',                        kw:'freizeitbad,atoll,schloss benkhausen,kino,theater,museum,konzert,eventim,bali therme,db vertrieb,harrison sport,buecherstube,bücherstube,tus nettelstedt' },
+  { name:'Paten & Geschenke',               kw:'johann alfes,clemens alfes,onkel nils,sparbetrag' },
+  { name:'Urlaub',                          kw:'airbnb,booking.com,hotel,flug,ryanair,lufthansa,ferienwohnung' },
+  { name:'Baby',                            kw:'babyone,baby one,deryan,babymarkt,love.faith,habbo,kurs 117,schuhmann-waltke' },
+  { name:'Sonstiges',                       kw:'' },
+];
+
+function loadCats() {
+  try { const s = localStorage.getItem('ausgaben_cats_v3'); if(s) return JSON.parse(s); } catch(e){}
+  return DEFAULT_CATS.map((c,i) => ({...c, color:COLORS[i%COLORS.length]}));
+}
+function saveCats() { try { localStorage.setItem('ausgaben_cats_v3', JSON.stringify(getCats())); } catch(e){} }
+function getCats() {
+  return [...document.querySelectorAll('#catGrid .cat-rule')].map(el => ({
+    name: el.querySelector('.cat-name-in').value.trim(),
+    kw:   el.querySelector('.cat-kw-in').value.trim(),
+    color: el.dataset.color,
+  }));
+}
+function renderCatGrid() {
+  const g = document.getElementById('catGrid'); g.innerHTML = '';
+  loadCats().forEach((c,i) => appendCatEl(g,c,i,COLORS,'saveCats'));
+}
+function appendCatEl(grid, cat, i, colors, saveFn) {
+  colors = colors || COLORS;
+  saveFn = saveFn || 'saveCats';
+  const col = cat.color || colors[i%colors.length];
+  const d = document.createElement('div');
+  d.className = 'cat-rule'; d.dataset.color = col;
+  d.innerHTML = `<div class="name-row">
+    <span style="width:10px;height:10px;border-radius:2px;background:${col};flex-shrink:0"></span>
+    <input type="text" class="cat-name-in" value="${esc(cat.name)}" placeholder="Kategoriename" oninput="${saveFn}()" onchange="${saveFn}()">
+    <button class="del-btn" onclick="this.closest('.cat-rule').remove();${saveFn}()">×</button>
+  </div>
+  <input type="text" class="cat-kw-in kw-in" value="${esc(cat.kw)}" placeholder="schlüsselwort1, word2, …" oninput="${saveFn}()" onchange="${saveFn}()">`;
+  grid.appendChild(d);
+}
+function addCat() {
+  const cats = getCats();
+  appendCatEl(document.getElementById('catGrid'),{name:'',kw:'',color:COLORS[cats.length%COLORS.length]},cats.length,COLORS,'saveCats');
+  saveCats();
+  document.querySelector('#catGrid .cat-rule:last-child .cat-name-in').focus();
+}
+
+// ── Einnahmen-Kategorien ─────────────────────────────────
+const INC_COLORS = ['#0f6e56','#185fa5','#534ab7','#3b6d11','#ba7517','#72243e','#854f0b'];
+
+const DEFAULT_INC_CATS = [
+  { name:'Gehalt',             kw:'gehalt,lohn,entgelt,bezüge,vergütung,salary' },
+  { name:'Kindergeld',         kw:'kindergeld,familienkasse,bundeskasse' },
+  { name:'Elterngeld',         kw:'elterngeld,elterngeldstelle,landesamt' },
+  { name:'Rente / Pension',    kw:'rente,pension,versorgung,rentenversicherung' },
+  { name:'Steuerrückzahlung',  kw:'finanzamt,steuererstattung,steuerverwaltung' },
+  { name:'Sonstige Einnahmen', kw:'' },
+];
+
+function loadIncCats() {
+  try { const s = localStorage.getItem('inc_cats_v1'); if(s) return JSON.parse(s); } catch(e){}
+  return DEFAULT_INC_CATS.map((c,i)=>({...c, color:INC_COLORS[i%INC_COLORS.length]}));
+}
+function saveIncCats() {
+  try { localStorage.setItem('inc_cats_v1', JSON.stringify(getIncCats())); } catch(e){}
+}
+function getIncCats() {
+  return [...document.querySelectorAll('#incCatGrid .cat-rule')].map(el=>({
+    name: el.querySelector('.cat-name-in').value.trim(),
+    kw:   el.querySelector('.cat-kw-in').value.trim(),
+    color: el.dataset.color,
+  }));
+}
+function renderIncCatGrid() {
+  const g = document.getElementById('incCatGrid'); g.innerHTML='';
+  loadIncCats().forEach((c,i) => appendCatEl(g, c, i, INC_COLORS, 'saveIncCats'));
+}
+function addIncCat() {
+  const cats = getIncCats();
+  appendCatEl(document.getElementById('incCatGrid'),
+    {name:'',kw:'',color:INC_COLORS[cats.length%INC_COLORS.length]},
+    cats.length, INC_COLORS, 'saveIncCats');
+  saveIncCats();
+  document.querySelector('#incCatGrid .cat-rule:last-child .cat-name-in').focus();
+}
+function categorizeInc(desc) {
+  const low=(desc||'').toLowerCase();
+  const incCats=getIncCats().filter(c=>c.name);
+  for(const c of incCats){
+    if(!c.kw) continue;
+    if(c.kw.split(',').map(k=>k.trim().toLowerCase()).filter(Boolean).some(k=>low.includes(k))) return c.name;
+  }
+  return incCats[incCats.length-1]?.name||'Sonstige Einnahmen';
+}
+
+function saveExclude() {
+  try { localStorage.setItem('ausgaben_exclude', document.getElementById('excludeKw').value); } catch(e){}
+}
+function loadExclude() {
+  try { return localStorage.getItem('ausgaben_exclude') || 'umbuchung,übertrag,intern,volksbank plus,dz bank'; } catch(e){ return ''; }
+}
+function getExcludeKws() {
+  return (document.getElementById('excludeKw').value || '')
+    .split(',').map(k=>k.trim().toLowerCase()).filter(Boolean);
+}
+function isExcluded(desc) {
+  const low = (desc||'').toLowerCase();
+  return getExcludeKws().some(k => low.includes(k));
+}
+
+// ── CSV ──────────────────────────────────────────────────
+function splitSemi(line) {
+  const r=[]; let cur=''; let q=false;
+  for(const c of line) {
+    if(c==='"'){q=!q;}
+    else if(c===';'&&!q){r.push(cur.trim().replace(/^"|"$/g,''));cur='';}
+    else cur+=c;
+  }
+  r.push(cur.trim().replace(/^"|"$/g,'')); return r;
+}
+
+function detectAndParse(text) {
+  const raw = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  const lines = raw.split('\n');
+
+  // Volksbank/Sparkasse: erste Zeile enthält "Buchungstag"
+  if((lines[0]||'').replace(/^\uFEFF/,'').includes('Buchungstag')) {
+    return parseTableFormat(lines, 0, {
+      date:    ['Buchungstag','Valutadatum'],
+      amount:  ['Betrag'],
+      payee:   ['Name Zahlungsbeteiligter','Auftraggeber / Auftragnehmer','Zahlungsempfänger','Beguenstigter/Zahlungspflichtiger'],
+      purpose: ['Verwendungszweck','Buchungstext'],
+    }, 'Volksbank/Sparkasse');
+  }
+
+  // ING: suche Zeile die mit "Buchung;" anfängt
+  const ingIdx = lines.findIndex(l => /^"?Buchung"?;/.test(l));
+  if(ingIdx >= 0) {
+    return parseTableFormat(lines, ingIdx, {
+      date:    ['Buchung','Buchungsdatum'],
+      amount:  ['__ING_BETRAG__'],
+      payee:   ['Auftraggeber/Empfänger','Auftraggeber/Empf\u00e4nger','Auftraggeber/Empfaenger','Auftraggeber'],
+      purpose: ['Verwendungszweck'],
+    }, 'ING', true);
+  }
+
+  // Generisch: finde erste Zeile mit >3 Semikolons
+  const genericIdx = lines.findIndex((l,i)=>i<=20 && l.split(';').length>3);
+  if(genericIdx >= 0) {
+    return parseTableFormat(lines, genericIdx, {
+      date:    ['Buchungstag','Datum','Date','Buchung','Buchungsdatum','Valutadatum'],
+      amount:  ['Betrag','Amount','Umsatz','Wert'],
+      payee:   ['Empfänger','Auftraggeber','Name Zahlungsbeteiligter','Zahlungsempfänger'],
+      purpose: ['Verwendungszweck','Beschreibung','Text','Buchungstext'],
+    }, 'Generisch');
+  }
+
+  return { rows:[], bank:'Unbekannt' };
+}
+
+function parseTableFormat(lines, headerIdx, colMap, bank, isING=false) {
+  const hdrs = splitSemi(lines[headerIdx].replace(/^\uFEFF/,''));
+
+  function findCol(names) {
+    for(const n of names) {
+      const idx = hdrs.findIndex(h => h.trim().toLowerCase() === n.toLowerCase());
+      if(idx >= 0) return idx;
+    }
+    for(const n of names) {
+      const idx = hdrs.findIndex(h => h.toLowerCase().includes(n.toLowerCase()));
+      if(idx >= 0) return idx;
+    }
+    return -1;
+  }
+
+  const dateIdx    = findCol(colMap.date);
+  let   amtIdx     = isING ? -1 : findCol(colMap.amount);
+  const payeeIdxs  = (colMap.payee||[]).map(n => findCol([n])).filter(i => i>=0);
+  const purposeIdxs= (colMap.purpose||[]).map(n => findCol([n])).filter(i => i>=0);
+
+  // ING: letztes Vorkommen von "Betrag" in Headern
+  if(isING) {
+    for(let i=hdrs.length-1;i>=0;i--) {
+      if(hdrs[i].toLowerCase().includes('betrag')){ amtIdx=i; break; }
+    }
+  }
+
+  const rows = [];
+  for(let i=headerIdx+1; i<lines.length; i++) {
+    const l = lines[i].trim();
+    if(!l || l.replace(/;/g,'').trim()==='') continue;
+    const vals = splitSemi(l);
+    if(vals.filter(Boolean).length < 2) continue;
+    const dateVal   = dateIdx>=0    ? vals[dateIdx]||''  : '';
+    const amtVal    = amtIdx>=0     ? vals[amtIdx]||''   : '';
+    if(!dateVal && !amtVal) continue;
+    const payee   = payeeIdxs.map(di=>vals[di]||'').filter(Boolean).join(' ').trim();
+    const purpose = purposeIdxs.map(di=>vals[di]||'').filter(Boolean).join(' · ').trim();
+    // Combined desc for matching: payee first, then purpose
+    const desc = [payee, purpose].filter(Boolean).join(' · ');
+    rows.push({ date:dateVal, amount:amtVal, payee, purpose, desc });
+  }
+  return { rows, bank };
+}
+
+function toFloat(s) {
+  s = String(s||'').trim();
+  if(!s) return NaN;
+  // 1.234,56 → 1234.56
+  if(/^-?[\d.]+,\d{1,2}$/.test(s)) return parseFloat(s.replace(/\./g,'').replace(',','.'));
+  // 1,234.56 → 1234.56
+  if(/^-?[\d,]+\.\d{1,2}$/.test(s)) return parseFloat(s.replace(/,/g,''));
+  // Nur Komma (keine Punkte): -17,81
+  s = s.replace(',','.').replace(/[^\d.\-]/g,'');
+  return parseFloat(s);
+}
+
+function parseDate(s) {
+  if(!s) return null;
+  let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if(m) return new Date(+m[3],+m[2]-1,+m[1]);
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if(m) return new Date(+m[1],+m[2]-1,+m[3]);
+  const d = new Date(s); return isNaN(d)?null:d;
+}
+
+// ── IndexedDB (speichert nur den FileSystemFileHandle) ───
+const IDB_NAME = 'haushaltsbuch';
+const IDB_STORE = 'meta';
+
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 2);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (d.objectStoreNames.contains('sqliteDb')) d.deleteObjectStore('sqliteDb');
+      if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta');
+    };
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror = e => reject(e.target.error);
+  });
+}
+async function idbPut(key, val) {
+  const idb = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = idb.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(val, key);
+    tx.oncomplete = resolve;
+    tx.onerror = e => reject(e.target.error);
+  });
+}
+async function idbGet(key) {
+  try {
+    const idb = await openIDB();
+    return new Promise(resolve => {
+      const tx = idb.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+// ── SQLite + Datei ────────────────────────────────────────
+let sqlDb = null;
+let dbFileHandle = null;
+let sqlJsModule = null;
+let dbInitPromise = null;
+
+const DB_FILE_TYPES = [{ description: 'SQLite-Datenbank', accept: { 'application/x-sqlite3': ['.db'] } }];
+const CREATE_SCHEMA = `CREATE TABLE IF NOT EXISTS transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  date_iso TEXT NOT NULL,
+  amount REAL NOT NULL,
+  payee TEXT NOT NULL DEFAULT '',
+  purpose TEXT NOT NULL DEFAULT '',
+  bank TEXT NOT NULL DEFAULT '',
+  UNIQUE(date_iso, amount, payee, purpose, bank)
+)`;
+
+async function saveDbToFile() {
+  if (!sqlDb || !dbFileHandle) return;
+  const writable = await dbFileHandle.createWritable();
+  await writable.write(sqlDb.export());
+  await writable.close();
+}
+
+async function loadAndOpenHandle(handle) {
+  const file = await handle.getFile();
+  const buf = new Uint8Array(await file.arrayBuffer());
+  sqlDb = buf.byteLength > 0 ? new sqlJsModule.Database(buf) : new sqlJsModule.Database();
+  sqlDb.run(CREATE_SCHEMA);
+  loadAllTxFromDb();
+}
+
+async function initDB() {
+  sqlJsModule = await initSqlJs({
+    locateFile: f => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${f}`
+  });
+  const handle = await idbGet('fileHandle');
+  if (handle) {
+    dbFileHandle = handle;
+    const perm = await handle.queryPermission({ mode: 'readwrite' });
+    if (perm === 'granted') await loadAndOpenHandle(handle);
+  }
+  updateDbStatus();
+}
+
+function checkFileApi() {
+  if (!('showSaveFilePicker' in window)) {
+    alert('Ihr Browser unterstützt die Dateizugriff-API nicht.\nBitte Chrome oder Edge verwenden.');
+    return false;
+  }
+  return true;
+}
+
+async function createDbFile() {
+  if (!checkFileApi()) return;
+  try {
+    const handle = await window.showSaveFilePicker({ suggestedName: 'haushaltsbuch.db', types: DB_FILE_TYPES });
+    dbFileHandle = handle;
+    await idbPut('fileHandle', handle);
+    sqlDb = new sqlJsModule.Database();
+    sqlDb.run(CREATE_SCHEMA);
+    await saveDbToFile();
+    loadAllTxFromDb();
+    updateDbStatus();
+  } catch (e) { if (e.name !== 'AbortError') console.error(e); }
+}
+
+async function openDbFile() {
+  if (!checkFileApi()) return;
+  try {
+    const [handle] = await window.showOpenFilePicker({ types: DB_FILE_TYPES });
+    dbFileHandle = handle;
+    await idbPut('fileHandle', handle);
+    await loadAndOpenHandle(handle);
+    updateDbStatus();
+  } catch (e) { if (e.name !== 'AbortError') console.error(e); }
+}
+
+async function requestFileAccess() {
+  if (!dbFileHandle) return;
+  try {
+    const perm = await dbFileHandle.requestPermission({ mode: 'readwrite' });
+    if (perm === 'granted') { await loadAndOpenHandle(dbFileHandle); updateDbStatus(); }
+  } catch (e) { console.error(e); }
+}
+
+function getTxCount() {
+  if (!sqlDb) return 0;
+  return sqlDb.exec('SELECT COUNT(*) FROM transactions')[0]?.values[0][0] || 0;
+}
+
+function loadAllTxFromDb() {
+  if (!sqlDb) return;
+  allTx = [];
+  const res = sqlDb.exec('SELECT date_iso, amount, payee, purpose, bank FROM transactions ORDER BY date_iso, rowid');
+  if (!res.length) return;
+  res[0].values.forEach(([date_iso, amount, payee, purpose, bank]) => {
+    const d = parseDate(date_iso);
+    if (!d) return;
+    allTx.push({
+      date: d,
+      monthKey: d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'),
+      amount,
+      absAmt: Math.abs(amount),
+      isExpense: amount < 0,
+      isIncome: amount > 0,
+      payee: payee || '',
+      purpose: purpose || '',
+      desc: [payee, purpose].filter(Boolean).join(' · '),
+      bank: bank || '',
+      cat: ''
+    });
+  });
+}
+
+const _btn = 'border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:0.75rem;cursor:pointer;font-family:inherit;background:none';
+
+function updateDbStatus() {
+  if (!sqlJsModule) return;
+  const el = document.getElementById('dbStatus');
+  const count = getTxCount();
+  let html = '';
+
+  if (!dbFileHandle) {
+    html = `<span style="flex:1">Keine Datenbankdatei ausgewählt</span>
+      <button onclick="createDbFile()" style="${_btn};background:var(--accent-light);color:var(--accent);border-color:transparent">Neue Datei erstellen</button>
+      <button onclick="openDbFile()" style="${_btn}">Bestehende öffnen</button>`;
+  } else if (!sqlDb) {
+    html = `<span style="color:var(--amber)">&#128274;</span>
+      <span style="flex:1">${esc(dbFileHandle.name)}</span>
+      <button onclick="requestFileAccess()" style="${_btn};background:var(--amber-light);color:var(--amber);border-color:transparent">Zugriff erteilen</button>
+      <button onclick="openDbFile()" style="${_btn}">Andere Datei&#8230;</button>`;
+  } else {
+    html = `<span style="color:var(--success)">&#10003;</span>
+      <span style="color:var(--muted);font-size:0.75rem">&#128196; ${esc(dbFileHandle.name)}</span>
+      <span style="flex:1;color:var(--muted)">${count.toLocaleString('de-DE')} Buchungen</span>
+      <button onclick="openDbFile()" style="${_btn};color:var(--accent)">Andere Datei&#8230;</button>
+      <button onclick="clearDb()" style="${_btn};color:var(--danger)">Daten l&#246;schen</button>`;
+    document.getElementById('runBtn').disabled = count === 0;
+  }
+  el.innerHTML = html;
+}
+
+async function clearDb() {
+  if (!sqlDb || !dbFileHandle) return;
+  if (!confirm('Alle gespeicherten Buchungen unwiderruflich löschen?')) return;
+  sqlDb.run('DELETE FROM transactions');
+  await saveDbToFile();
+  allTx = [];
+  document.getElementById('fileTags').innerHTML = '';
+  document.getElementById('report').innerHTML = '';
+  updateDbStatus();
+}
+
+// ── State ────────────────────────────────────────────────
+let allTx = [];
+let chartInstances = {};
+
+function handleFiles(files) {
+  const tags = document.getElementById('fileTags');
+  tags.innerHTML = '';
+  if (!files.length) return;
+
+  (async () => {
+    if (dbInitPromise) try { await dbInitPromise; } catch {}
+
+    if (!sqlDb) {
+      const msg = !dbFileHandle
+        ? 'Bitte zuerst eine Datenbankdatei auswählen oder erstellen.'
+        : 'Bitte zuerst den Dateizugriff erteilen.';
+      tags.innerHTML = `<span style="color:var(--amber);font-size:0.8rem">&#9888; ${msg}</span>`;
+      return;
+    }
+
+    for (const file of files) {
+      const { rows, bank } = detectAndParse(await file.text());
+      let added = 0, dupes = 0;
+      rows.forEach(r => {
+        const d = parseDate(r.date);
+        const amt = toFloat(r.amount);
+        if (!d || isNaN(amt)) return;
+        const iso = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+        sqlDb.run(
+          'INSERT OR IGNORE INTO transactions (date_iso, amount, payee, purpose, bank) VALUES (?, ?, ?, ?, ?)',
+          [iso, amt, r.payee||'', r.purpose||'', bank]
+        );
+        if (sqlDb.getRowsModified() > 0) added++; else dupes++;
+      });
+      let tagHtml = `&#10003; ${esc(file.name)}&nbsp;<span style="opacity:.6">(${bank}, ${added} neu`;
+      if (dupes > 0) tagHtml += `, ${dupes} Duplikat${dupes !== 1 ? 'e' : ''}`;
+      tagHtml += ')</span>';
+      tags.innerHTML += `<span class="file-tag">${tagHtml}</span>`;
+    }
+
+    await saveDbToFile();
+    loadAllTxFromDb();
+    updateDbStatus();
+  })().catch(err => console.error('Fehler beim Verarbeiten:', err));
+}
+
+const dz = document.getElementById('dropZone');
+dz.addEventListener('click', () => document.getElementById('fileInput').click());
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+document.getElementById('fileInput').addEventListener('change', e => handleFiles(e.target.files));
+
+// ── Kategorisierung ──────────────────────────────────────
+function categorize(desc, cats) {
+  const low = (desc||'').toLowerCase();
+  for(const c of cats) {
+    if(!c.kw) continue;
+    if(c.kw.split(',').map(k=>k.trim().toLowerCase()).filter(Boolean).some(k=>low.includes(k))) return c.name;
+  }
+  return cats[cats.length-1]?.name || 'Sonstiges';
+}
+
+// ── Report ────────────────────────────────────────────────
+function runReport() {
+  const cats = getCats().filter(c=>c.name); saveCats(); saveIncCats(); saveExclude();
+  // Exclude + categorize
+  allTx.forEach(tx => {
+    tx.excluded = isExcluded(tx.desc);
+    tx.cat = tx.isExpense ? categorize(tx.desc,cats) : categorizeInc(tx.desc);
+  });
+  Object.values(chartInstances).forEach(c=>c.destroy()); chartInstances={};
+
+  // Only non-excluded
+  const activeTx = allTx.filter(tx => !tx.excluded);
+  const excludedCount = allTx.length - activeTx.length;
+
+  const months = {};
+  activeTx.forEach(tx => { if(!months[tx.monthKey]) months[tx.monthKey]=[]; months[tx.monthKey].push(tx); });
+  const sorted = Object.keys(months).sort();
+
+  let html = '';
+
+  if(excludedCount > 0) {
+    html += `<div style="background:var(--amber-light);color:var(--amber);border-radius:8px;padding:0.5rem 1rem;font-size:0.8rem;margin-bottom:1rem">
+      &#8856; ${excludedCount} Transaktion(en) durch Ausschluss-Schlüsselwörter ignoriert</div>`;
+  }
+
+  // ── Gesamtübersicht nach Kategorien ──
+  const allExp = activeTx.filter(r=>r.isExpense);
+  const allInc = activeTx.filter(r=>r.isIncome);
+  const globalCatT = {};
+  allExp.forEach(r=>{ globalCatT[r.cat]=(globalCatT[r.cat]||0)+r.absAmt; });
+  const globalCats = Object.entries(globalCatT).sort((a,b)=>b[1]-a[1]);
+  const grandTotal = globalCats.reduce((s,[,v])=>s+v,0);
+  const totalInc = allInc.reduce((s,r)=>s+r.absAmt, 0);
+
+  if(globalCats.length && sorted.length > 1) {
+    // Build month-by-cat matrix
+    const catNames = globalCats.map(([c])=>c);
+    const catMonthTotals = {};
+    catNames.forEach(c=>{ catMonthTotals[c]={}; sorted.forEach(mk=>{ catMonthTotals[c][mk]=0; }); });
+    allExp.forEach(tx=>{ if(catMonthTotals[tx.cat]) catMonthTotals[tx.cat][tx.monthKey]=(catMonthTotals[tx.cat][tx.monthKey]||0)+tx.absAmt; });
+
+    const monthLabels = sorted.map(mk=>{ const[y,m]=mk.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('de-DE',{month:'short',year:'2-digit'}); });
+
+    // Income per month
+    const monthInc  = sorted.map(mk=>allInc.filter(r=>r.monthKey===mk).reduce((s,r)=>s+r.absAmt,0));
+    const monthSums = sorted.map(mk=>allExp.filter(r=>r.monthKey===mk).reduce((s,r)=>s+r.absAmt,0));
+
+    html += `<div class="total-overview">
+      <h3>Gesamtübersicht nach Kategorien</h3>
+      <div style="display:grid;grid-template-columns:1fr 280px;gap:1.5rem;align-items:start;margin-bottom:1.5rem">
+        <div style="position:relative;height:${Math.max(200,globalCats.length*28)}px">
+          <canvas id="chart_total" role="img" aria-label="Gesamtausgaben nach Kategorien"></canvas></div>
+        <div style="position:relative;height:280px">
+          <canvas id="chart_total_pie" role="img" aria-label="Gesamtausgaben Tortendiagramm"></canvas></div>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="total-table">
+        <thead><tr><th>Kategorie</th>${monthLabels.map(l=>`<th>${l}</th>`).join('')}<th>Gesamt</th><th>Ø/Monat</th></tr></thead>
+        <tbody>`;
+
+    // Category rows (expenses)
+    globalCats.forEach(([cat,total])=>{
+      const col = cats.find(c=>c.name===cat)?.color||'#888';
+      const monthVals = sorted.map(mk=>catMonthTotals[cat][mk]||0);
+      const avg = total/sorted.length;
+      html += `<tr>
+        <td><div class="cat-cell"><span style="width:9px;height:9px;border-radius:2px;background:${col};flex-shrink:0"></span>${esc(cat)}</div></td>
+        ${monthVals.map(v=>`<td>${v>0?'<span style="color:var(--danger)">–'+fmt(v)+'</span>':'<span style="color:var(--border)">–</span>'}</td>`).join('')}
+        <td class="highlight" style="color:var(--danger)">–${fmt(total)}</td>
+        <td style="color:var(--danger)">–${fmt(avg)}</td></tr>`;
+    });
+
+    // Separator + Ausgaben-Summe
+    html += `<tr style="border-top:2px solid var(--border);font-weight:500">
+      <td>&#931; Ausgaben</td>
+      ${monthSums.map(v=>`<td style="color:var(--danger)">–${fmt(v)}</td>`).join('')}
+      <td style="color:var(--danger)">–${fmt(grandTotal)}</td>
+      <td style="color:var(--danger)">–${fmt(grandTotal/sorted.length)}</td></tr>`;
+
+    // Einnahmen-Zeile (nur wenn vorhanden)
+    if(totalInc > 0) {
+      // Einnahmen nach Kategorien aufschlüsseln
+      const incCatT={};
+      allInc.forEach(r=>{ incCatT[r.cat]=(incCatT[r.cat]||0)+r.absAmt; });
+      const incCatEntries = Object.entries(incCatT).sort((a,b)=>b[1]-a[1]);
+      const incCatMonth={};
+      incCatEntries.forEach(([c])=>{ incCatMonth[c]={}; sorted.forEach(mk=>{ incCatMonth[c][mk]=0; }); });
+      allInc.forEach(tx=>{ if(incCatMonth[tx.cat]) incCatMonth[tx.cat][tx.monthKey]=(incCatMonth[tx.cat][tx.monthKey]||0)+tx.absAmt; });
+      const currentIncCats = getIncCats();
+
+      // Trennzeile
+      html += `<tr style="border-top:2px solid var(--border)"><td colspan="${sorted.length+3}" style="padding:0.5rem 0.75rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--success);font-weight:500">Einnahmen</td></tr>`;
+
+      incCatEntries.forEach(([cat,total])=>{
+        const col = currentIncCats.find(c=>c.name===cat)?.color||INC_COLORS[0];
+        const mVals = sorted.map(mk=>incCatMonth[cat][mk]||0);
+        html += `<tr>
+          <td><div class="cat-cell"><span style="width:9px;height:9px;border-radius:2px;background:${col};flex-shrink:0"></span>${esc(cat)}</div></td>
+          ${mVals.map(v=>`<td>${v>0?'<span style="color:var(--success)">+'+fmt(v)+'</span>':'<span style="color:var(--border)">–</span>'}</td>`).join('')}
+          <td style="color:var(--success);font-weight:500">+${fmt(total)}</td>
+          <td style="color:var(--success)">+${fmt(total/sorted.length)}</td></tr>`;
+      });
+
+      // Einnahmen-Summe
+      html += `<tr style="font-weight:500">
+        <td>&#931; Einnahmen</td>
+        ${monthInc.map(v=>`<td style="color:var(--success)">${v>0?'+'+fmt(v):'<span style="color:var(--border)">–</span>'}</td>`).join('')}
+        <td style="color:var(--success)">+${fmt(totalInc)}</td>
+        <td style="color:var(--success)">+${fmt(totalInc/sorted.length)}</td></tr>`;
+
+      // Saldo-Zeile
+      const monthSaldo = sorted.map((_,i) => monthInc[i] - monthSums[i]);
+      const totalSaldo = totalInc - grandTotal;
+      html += `<tr style="border-top:1px solid var(--border);font-weight:600">
+        <td>Saldo</td>
+        ${monthSaldo.map(v=>`<td style="color:${v>=0?'var(--success)':'var(--danger)'}">${v>=0?'+':''}${fmt(v)}</td>`).join('')}
+        <td style="color:${totalSaldo>=0?'var(--success)':'var(--danger)'};font-weight:700">${totalSaldo>=0?'+':''}${fmt(totalSaldo)}</td>
+        <td style="color:${(totalSaldo/sorted.length)>=0?'var(--success)':'var(--danger)'}">${(totalSaldo/sorted.length)>=0?'+':''}${fmt(totalSaldo/sorted.length)}</td></tr>`;
+    }
+
+    html += `</tbody></table></div></div>`;
+  }
+
+  // ── Einkommensquote ──────────────────────────────────────
+  if(totalInc > 0 && grandTotal > 0 && sorted.length > 0) {
+    const avgMonthInc = totalInc / sorted.length;
+    const avgMonthExp = grandTotal / sorted.length;
+    const remaining   = avgMonthInc - avgMonthExp;
+    const overBudget  = remaining < 0;
+    const incLabel    = sorted.length > 1 ? `Ø ${fmt(avgMonthInc)}/Monat` : fmt(avgMonthInc);
+
+    html += `<div class="overview-card">
+      <div style="display:flex;align-items:baseline;gap:1rem;margin-bottom:1rem">
+        <h3 style="margin:0">Einkommensquote</h3>
+        <span style="font-size:0.78rem;color:var(--muted)">Basis: ${incLabel}</span>
+      </div>
+      <div style="overflow-x:auto"><div style="display:grid;grid-template-columns:160px 1fr 60px 96px;gap:0.45rem 0.75rem;align-items:center;font-size:0.82rem;min-width:420px">`;
+
+    globalCats.forEach(([cat, total]) => {
+      const col = cats.find(c=>c.name===cat)?.color || '#888';
+      const avg = total / sorted.length;
+      const pct = avg / avgMonthInc * 100;
+      html += `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(cat)}">${esc(cat)}</span>
+        <div class="bar-wrap"><div class="bar-fill" style="width:${Math.min(pct,100).toFixed(1)}%;background:${col}"></div></div>
+        <span style="text-align:right;color:var(--muted)">${pct.toFixed(1)}&thinsp;%</span>
+        <span style="text-align:right;color:var(--danger)">–${fmt(avg)}</span>`;
+    });
+
+    const expPct = Math.min(avgMonthExp / avgMonthInc * 100, 100);
+    const remPct = Math.max(100 - avgMonthExp / avgMonthInc * 100, 0);
+    html += `<div style="grid-column:1/-1;border-top:1px solid var(--border);margin:0.1rem 0"></div>
+      <span style="font-weight:500">Σ Ausgaben</span>
+      <div class="bar-wrap" style="height:10px"><div class="bar-fill" style="width:${expPct.toFixed(1)}%;background:var(--danger)"></div></div>
+      <span style="text-align:right;font-weight:500;color:var(--danger)">${expPct.toFixed(1)}&thinsp;%</span>
+      <span style="text-align:right;font-weight:500;color:var(--danger)">–${fmt(avgMonthExp)}</span>
+      <span style="font-weight:600;color:${overBudget?'var(--danger)':'var(--success)'}">Verbleibend</span>
+      <div class="bar-wrap" style="height:10px"><div class="bar-fill" style="width:${remPct.toFixed(1)}%;background:${overBudget?'var(--danger)':'var(--success)'}"></div></div>
+      <span style="text-align:right;font-weight:600;color:${overBudget?'var(--danger)':'var(--success)'}">${remPct.toFixed(1)}&thinsp;%</span>
+      <span style="text-align:right;font-weight:600;color:${overBudget?'var(--danger)':'var(--success)'}">${overBudget?'–':'+'}${fmt(Math.abs(remaining))}</span>`;
+    html += `</div></div></div>`;
+  }
+
+  // ── Monatliche Übersicht Chart ──
+  const ovId = 'chart_overview';
+  html += `<div class="overview-card"><h3>Monatliche Ausgaben im Überblick</h3><div style="position:relative;height:220px"><canvas id="${ovId}" role="img" aria-label="Monatliche Ausgaben Überblick"></canvas></div></div>`;
+
+  sorted.forEach(mk => {
+    const rows = months[mk];
+    const exp  = rows.filter(r=>r.isExpense);
+    const inc  = rows.filter(r=>r.isIncome);
+    const totExp = exp.reduce((s,r)=>s+r.absAmt,0);
+    const totInc = inc.reduce((s,r)=>s+r.absAmt,0);
+    const catT = {}; exp.forEach(r=>{ catT[r.cat]=(catT[r.cat]||0)+r.absAmt; });
+    const sortedCats = Object.entries(catT).sort((a,b)=>b[1]-a[1]);
+    const maxC = sortedCats[0]?.[1]||1;
+    const [yr,mn] = mk.split('-');
+    const label = new Date(+yr,+mn-1,1).toLocaleDateString('de-DE',{month:'long',year:'numeric'});
+
+    html += `<div class="month-block"><div class="month-title">${label}</div>
+      <div class="summary-cards">
+        <div class="stat-card exp"><div class="lbl">Ausgaben</div><div class="val">&ndash;${fmt(totExp)}</div></div>
+        ${totInc>0?`<div class="stat-card inc"><div class="lbl">Einnahmen</div><div class="val">+${fmt(totInc)}</div></div>`:''}
+        ${totInc>0?`<div class="stat-card"><div class="lbl">Saldo</div><div class="val">${fmt(totInc-totExp)}</div></div>`:''}
+        <div class="stat-card"><div class="lbl">Buchungen</div><div class="val">${exp.length}</div></div>
+      </div>`;
+
+    if(sortedCats.length) {
+      html += `<div style="display:grid;grid-template-columns:1fr 180px;gap:1rem;align-items:center">
+        <div class="cat-bars">`;
+      sortedCats.forEach(([cat,amt]) => {
+        const pct = (amt/maxC*100).toFixed(1);
+        const col = cats.find(c=>c.name===cat)?.color||'#888';
+        html += `<div class="bar-row">
+          <span class="cat-name" title="${esc(cat)}">${esc(cat)}</span>
+          <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>
+          <span class="amount">${fmt(amt)}</span></div>`;
+      });
+      html += `</div>
+        <div style="position:relative;height:180px">
+          <canvas id="chart_pie_${mk.replace('-','_')}" role="img" aria-label="Ausgaben ${label}"></canvas>
+        </div>
+      </div>`;
+    }
+
+    if(totInc > 0 && sortedCats.length) {
+      const overM    = totExp > totInc;
+      const expPctM  = Math.min(totExp / totInc * 100, 100);
+      const remPctM  = Math.max(100 - totExp / totInc * 100, 0);
+      html += `<div class="cat-bars" style="margin-top:0.75rem">
+        <div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:0.5rem">Einkommensquote &middot; Basis ${fmt(totInc)}</div>
+        <div style="display:grid;grid-template-columns:120px 1fr 56px 88px;gap:0.35rem 0.6rem;align-items:center;font-size:0.8rem">`;
+      sortedCats.forEach(([cat, amt]) => {
+        const col = cats.find(c=>c.name===cat)?.color||'#888';
+        const pct = amt / totInc * 100;
+        html += `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(cat)}">${esc(cat)}</span>
+          <div class="bar-wrap"><div class="bar-fill" style="width:${Math.min(pct,100).toFixed(1)}%;background:${col}"></div></div>
+          <span style="text-align:right;color:var(--muted)">${pct.toFixed(1)}&thinsp;%</span>
+          <span style="text-align:right;color:var(--danger)">–${fmt(amt)}</span>`;
+      });
+      html += `<div style="grid-column:1/-1;border-top:1px solid var(--border);margin:0.1rem 0"></div>
+        <span style="font-weight:500">Σ Ausgaben</span>
+        <div class="bar-wrap" style="height:9px"><div class="bar-fill" style="width:${expPctM.toFixed(1)}%;background:var(--danger)"></div></div>
+        <span style="text-align:right;font-weight:500;color:var(--danger)">${expPctM.toFixed(1)}&thinsp;%</span>
+        <span style="text-align:right;font-weight:500;color:var(--danger)">–${fmt(totExp)}</span>
+        <span style="font-weight:600;color:${overM?'var(--danger)':'var(--success)'}">Verbleibend</span>
+        <div class="bar-wrap" style="height:9px"><div class="bar-fill" style="width:${remPctM.toFixed(1)}%;background:${overM?'var(--danger)':'var(--success)'}"></div></div>
+        <span style="text-align:right;font-weight:600;color:${overM?'var(--danger)':'var(--success)'}">${remPctM.toFixed(1)}&thinsp;%</span>
+        <span style="text-align:right;font-weight:600;color:${overM?'var(--danger)':'var(--success)'}">${overM?'–':'+'}${fmt(Math.abs(totInc-totExp))}</span>`;
+      html += `</div></div>`;
+    }
+
+    const mkSafe = mk.replace('-','_');
+    const expSorted = exp.slice().sort((a,b)=>b.date-a.date);
+    // Build chip list: "Alle" + one per category present this month
+    const catsThisMonth = [...new Set(expSorted.map(t=>t.cat))].sort((a,b)=>{
+      const ta = catT[a]||0, tb = catT[b]||0; return tb-ta;
+    });
+    let chipsHtml = `<div class="filter-bar" id="filterbar_${mkSafe}">
+      <span class="filter-chip chip-all" onclick="filterTx('${mkSafe}','__all__',this)">Alle (${expSorted.length})</span>`;
+    catsThisMonth.forEach(cat => {
+      const col = cats.find(c=>c.name===cat)?.color||'#888';
+      const n = expSorted.filter(t=>t.cat===cat).length;
+      chipsHtml += `<span class="filter-chip" data-cat="${esc(cat)}" onclick="filterTx('${mkSafe}','${esc(cat)}',this)" style="--chip-col:${col}">
+        <span class="dot" style="background:${col}"></span>${esc(cat)} (${n})</span>`;
+    });
+    chipsHtml += `</div><div class="filter-summary" id="filtersummary_${mkSafe}"></div>`;
+
+    html += `<button class="tx-toggle" onclick="toggleTx('tx_${mkSafe}',this)">&#9658; Einzelbuchungen anzeigen (${expSorted.length})</button>
+      <div id="tx_${mkSafe}" style="display:none">
+      ${chipsHtml}
+      <div class="tx-wrap"><table class="tx-table" id="txtable_${mkSafe}">
+      <thead><tr><th>Datum</th><th>Empfänger</th><th>Verwendungszweck</th><th>Kategorie</th><th>Konto</th><th>Betrag</th></tr></thead><tbody>`;
+    expSorted.forEach(tx => {
+      const col = cats.find(c=>c.name===tx.cat)?.color||'#888';
+      const purposeShort = tx.purpose ? (tx.purpose.substring(0,60)+(tx.purpose.length>60?'…':'')) : '';
+      html += `<tr data-cat="${esc(tx.cat)}">
+        <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+        <td style="font-weight:500">${esc(tx.payee||tx.desc.substring(0,40))}</td>
+        <td style="color:var(--muted)">${esc(purposeShort)}</td>
+        <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span></td>
+        <td style="color:var(--muted);font-size:0.75rem">${esc(tx.bank)}</td>
+        <td>&ndash;${fmt(tx.absAmt)}</td></tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+
+    // ── Einnahmen dieses Monats ──
+    if(inc.length > 0) {
+      const incSorted = inc.slice().sort((a,b)=>b.date-a.date);
+      const incCatT={}; incSorted.forEach(r=>{ incCatT[r.cat]=(incCatT[r.cat]||0)+r.absAmt; });
+      const incCatsMonth = [...new Set(incSorted.map(t=>t.cat))].sort((a,b)=>(incCatT[b]||0)-(incCatT[a]||0));
+      const currentIncCats = getIncCats();
+
+      let incChips = `<div class="filter-bar" id="incbar_${mkSafe}">
+        <span class="filter-chip chip-all" style="background:var(--success);color:#fff;border-color:transparent"
+          onclick="filterInc('${mkSafe}','__all__',this)">Alle (${incSorted.length})</span>`;
+      incCatsMonth.forEach(cat=>{
+        const col=currentIncCats.find(c=>c.name===cat)?.color||INC_COLORS[0];
+        const n=incSorted.filter(t=>t.cat===cat).length;
+        incChips+=`<span class="filter-chip" data-cat="${esc(cat)}"
+          onclick="filterInc('${mkSafe}','${esc(cat)}',this)" style="--chip-col:${col}">
+          <span class="dot" style="background:${col}"></span>${esc(cat)} (${n})</span>`;
+      });
+      incChips+=`</div><div class="filter-summary" id="incsummary_${mkSafe}"></div>`;
+
+      html+=`<button class="tx-toggle" style="color:var(--success)" onclick="toggleTx('inctx_${mkSafe}',this)">&#9658; Einnahmen anzeigen (${incSorted.length})</button>
+        <div id="inctx_${mkSafe}" style="display:none">
+        ${incChips}
+        <div class="tx-wrap"><table class="tx-table" id="inctable_${mkSafe}">
+        <thead><tr><th>Datum</th><th>Absender</th><th>Verwendungszweck</th><th>Kategorie</th><th>Konto</th><th>Betrag</th></tr></thead><tbody>`;
+      incSorted.forEach(tx=>{
+        const col=currentIncCats.find(c=>c.name===tx.cat)?.color||INC_COLORS[0];
+        const ps=tx.purpose?(tx.purpose.substring(0,60)+(tx.purpose.length>60?'…':'')):'';
+        html+=`<tr data-cat="${esc(tx.cat)}">
+          <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+          <td style="font-weight:500">${esc(tx.payee||tx.desc.substring(0,40))}</td>
+          <td style="color:var(--muted)">${esc(ps)}</td>
+          <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span></td>
+          <td style="color:var(--muted);font-size:0.75rem">${esc(tx.bank)}</td>
+          <td style="color:var(--success)">+${fmt(tx.absAmt)}</td></tr>`;
+      });
+      html+=`</tbody></table></div></div>`;
+    }
+
+    html += `</div>`;
+  });
+
+  html += `<div style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;align-items:center;gap:1rem">
+    <button class="export-btn" onclick="exportCSV()">&#8595; CSV exportieren</button>
+    <span style="font-size:0.8rem;color:var(--muted)">Kategorisierte Transaktionen herunterladen</span></div>`;
+
+  document.getElementById('report').innerHTML = html;
+
+  setTimeout(()=>{
+    const surfaceColor = window.matchMedia('(prefers-color-scheme: dark)').matches ? '#262624' : '#ffffff';
+    const makePie = (entries, colorFn) => ({
+      type: 'doughnut',
+      data: {
+        labels: entries.map(([c])=>c),
+        datasets: [{ data: entries.map(([,v])=>v),
+          backgroundColor: entries.map(colorFn),
+          borderWidth: 2, borderColor: surfaceColor, hoverOffset: 8 }]
+      },
+      options: { responsive:true, maintainAspectRatio:false,
+        plugins: { legend:{ display:false },
+          tooltip:{ callbacks:{ label: ctx => {
+            const val = ctx.dataset.data[ctx.dataIndex];
+            const total = ctx.dataset.data.reduce((s,v)=>s+v,0);
+            return ` ${fmt(val)} (${(val/total*100).toFixed(1)} %)`;
+          }}}}
+      }
+    });
+
+    // Gesamtübersicht Balkendiagramm
+    const totalCtx = document.getElementById('chart_total');
+    if(totalCtx && globalCats.length) {
+      chartInstances['chart_total'] = new Chart(totalCtx,{
+        type:'bar',
+        data:{ labels:globalCats.map(([c])=>c), datasets:[{
+          data:globalCats.map(([,v])=>v),
+          backgroundColor:globalCats.map(([cat])=>cats.find(c=>c.name===cat)?.color||'#888'),
+          borderRadius:4,
+        }]},
+        options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ display:false } },
+          scales:{ x:{ ticks:{ callback:v=>fmt(v) } }, y:{ ticks:{ font:{ size:11 } } } } }
+      });
+    }
+
+    // Gesamtübersicht Tortendiagramm
+    const totalPieCtx = document.getElementById('chart_total_pie');
+    if(totalPieCtx && globalCats.length) {
+      chartInstances['chart_total_pie'] = new Chart(totalPieCtx,
+        makePie(globalCats, ([cat])=>cats.find(c=>c.name===cat)?.color||'#888'));
+    }
+
+    // Monatliche Balken-Übersicht
+    const ovCtx = document.getElementById(ovId);
+    if(ovCtx) {
+      const lbls = sorted.map(mk=>{ const[y,m]=mk.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('de-DE',{month:'short',year:'2-digit'}); });
+      chartInstances[ovId] = new Chart(ovCtx,{
+        type:'bar', data:{ labels:lbls, datasets:[
+          { label:'Ausgaben', data:sorted.map(mk=>months[mk].filter(r=>r.isExpense).reduce((s,r)=>s+r.absAmt,0)), backgroundColor:'#185fa5bb', borderRadius:4 },
+          { label:'Einnahmen', data:sorted.map(mk=>months[mk].filter(r=>r.isIncome).reduce((s,r)=>s+r.absAmt,0)), backgroundColor:'#0f6e5688', borderRadius:4 },
+        ]},
+        options:{ responsive:true,maintainAspectRatio:false,
+          plugins:{ legend:{ display:false } },
+          scales:{ y:{ ticks:{ callback:v=>fmt(v) } }, x:{ ticks:{ autoSkip:false,maxRotation:45 } } } }
+      });
+    }
+
+    // Monatliche Tortendiagramme
+    sorted.forEach(mk => {
+      const pieCtx = document.getElementById('chart_pie_'+mk.replace('-','_'));
+      if(!pieCtx) return;
+      const exp = months[mk].filter(r=>r.isExpense);
+      const catT = {};
+      exp.forEach(r=>{ catT[r.cat]=(catT[r.cat]||0)+r.absAmt; });
+      const catEntries = Object.entries(catT).sort((a,b)=>b[1]-a[1]);
+      if(!catEntries.length) return;
+      chartInstances['chart_pie_'+mk.replace('-','_')] = new Chart(pieCtx,
+        makePie(catEntries, ([cat])=>cats.find(c=>c.name===cat)?.color||'#888'));
+    });
+  }, 60);
+}
+
+function fmt(n) { return new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(n); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function toggleTx(id,btn) {
+  const el=document.getElementById(id);
+  if(el.style.display==='none'){el.style.display='';btn.textContent=btn.textContent.replace('▸','▾').replace('anzeigen','ausblenden');}
+  else{el.style.display='none';btn.textContent=btn.textContent.replace('▾','▸').replace('ausblenden','anzeigen');}
+}
+
+function filterChips(prefix, mkSafe, cat, chipEl) {
+  const isInc   = prefix === 'inc';
+  const table   = document.getElementById((isInc?'inctable_':'txtable_')+mkSafe);
+  const summary = document.getElementById((isInc?'incsummary_':'filtersummary_')+mkSafe);
+  const bar     = document.getElementById((isInc?'incbar_':'filterbar_')+mkSafe);
+  if(!table) return;
+
+  bar.querySelectorAll('.filter-chip').forEach(c => {
+    c.style.background=''; c.style.color=''; c.style.borderColor='';
+  });
+
+  if(cat === '__all__') {
+    chipEl.style.background = isInc ? 'var(--success)' : 'var(--text)';
+    chipEl.style.color = isInc ? '#fff' : 'var(--bg)';
+    table.querySelectorAll('tbody tr').forEach(r => r.style.display='');
+    summary.textContent = '';
+  } else {
+    const allChip = bar.querySelector('[onclick*="__all__"]');
+    if(allChip) { allChip.style.background='var(--bg)'; allChip.style.color='var(--muted)'; allChip.style.borderColor='var(--border)'; }
+    const col = chipEl.style.getPropertyValue('--chip-col') || '#888';
+    chipEl.style.background=col; chipEl.style.color='#fff'; chipEl.style.borderColor='transparent';
+    let visible=0, sum=0;
+    table.querySelectorAll('tbody tr').forEach(r => {
+      const match = r.dataset.cat === cat;
+      r.style.display = match ? '' : 'none';
+      if(match) visible++;
+    });
+    table.querySelectorAll(`tbody tr[data-cat="${CSS.escape(cat)}"] td:last-child`).forEach(td => {
+      const v = parseFloat(td.textContent.replace(/[+\-–]/g,'').replace(/[^\d,]/g,'').replace(',','.'));
+      if(!isNaN(v)) sum+=v;
+    });
+    summary.textContent = `${visible} Buchungen · Gesamt: ${isInc?'+':'–'}${fmt(sum)}`;
+  }
+}
+function filterTx(mkSafe, cat, chipEl)  { filterChips('',    mkSafe, cat, chipEl); }
+function filterInc(mkSafe, cat, chipEl) { filterChips('inc', mkSafe, cat, chipEl); }
+
+function exportCSV() {
+  const hdrs=['Datum','Empfänger','Verwendungszweck','Kategorie','Konto','Betrag'];
+  const rows=allTx.filter(t=>t.isExpense&&!t.excluded).sort((a,b)=>b.date-a.date).map(t=>[
+    t.date.toLocaleDateString('de-DE'), t.payee||'', t.purpose||'', t.cat, t.bank,
+    ('-'+t.absAmt.toFixed(2)).replace('.',',')
+  ]);
+  const csv=[hdrs.join(';'),...rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(';'))].join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download='ausgaben_kategorisiert.csv';a.click();
+}
+
+function filterInc(mkSafe, cat, chipEl) {
+  const table = document.getElementById('inctable_'+mkSafe);
+  const summary = document.getElementById('incsummary_'+mkSafe);
+  const bar = document.getElementById('incbar_'+mkSafe);
+  if(!table) return;
+  bar.querySelectorAll('.filter-chip').forEach(c=>{
+    c.style.background=''; c.style.color=''; c.style.borderColor='';
+  });
+  if(cat==='__all__') {
+    chipEl.style.background='var(--success)'; chipEl.style.color='#fff'; chipEl.style.borderColor='transparent';
+    table.querySelectorAll('tbody tr').forEach(r=>r.style.display='');
+    summary.textContent='';
+  } else {
+    const allChip=bar.querySelector('[onclick*="__all__"]');
+    if(allChip){allChip.style.background='var(--bg)';allChip.style.color='var(--muted)';allChip.style.borderColor='var(--border)';}
+    const col=chipEl.style.getPropertyValue('--chip-col')||'#888';
+    chipEl.style.background=col; chipEl.style.color='#fff'; chipEl.style.borderColor='transparent';
+    let visible=0, sum=0;
+    table.querySelectorAll('tbody tr').forEach(r=>{
+      const match=r.dataset.cat===cat;
+      r.style.display=match?'':'none';
+      if(match) visible++;
+    });
+    table.querySelectorAll(`tbody tr[data-cat="${CSS.escape(cat)}"] td:last-child`).forEach(td=>{
+      const v=parseFloat(td.textContent.replace('+','').replace(/[^\d,]/g,'').replace(',','.'));
+      if(!isNaN(v)) sum+=v;
+    });
+    summary.textContent=`${visible} Buchungen · Gesamt: +${fmt(sum)}`;
+  }
+}
+
+renderCatGrid();
+renderIncCatGrid();
+document.getElementById('excludeKw').value = loadExclude();
+window.addEventListener('beforeunload', () => { saveCats(); saveIncCats(); saveExclude(); });
+
+dbInitPromise = initDB().catch(err => {
+  console.warn('SQLite konnte nicht initialisiert werden:', err);
+});
+</script>
+</body>
+</html>
