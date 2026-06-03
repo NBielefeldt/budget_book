@@ -112,6 +112,23 @@
   .total-table tr:last-child td { border-bottom: none; font-weight: 500; color: var(--text); }
   .total-table tr:last-child td:not(:first-child) { color: var(--danger); }
   .total-table .highlight { color: var(--text) !important; font-weight: 500; }
+
+  /* ── Mittelherkunft ───────────────────────────────────── */
+  #fondsModal { position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.55);overflow-y:auto;padding:2rem 1rem; }
+  .fonds-panel { max-width:900px;margin:0 auto;background:var(--surface);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.35); }
+  .fonds-card { background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1rem 1.25rem;margin-bottom:0.75rem; }
+  .fonds-card-hdr { display:flex;align-items:center;gap:0.6rem; }
+  .fonds-card-hdr input[type=text] { flex:1;font-size:0.95rem;font-weight:500;background:transparent;border:none;border-bottom:1px solid transparent;color:var(--text);font-family:inherit;padding:0.1rem 0; }
+  .fonds-card-hdr input[type=text]:focus { outline:none;border-bottom-color:var(--accent); }
+  .fonds-stats { display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-top:0.6rem; }
+  .fonds-stat { background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.75rem; }
+  .fonds-stat .lbl { font-size:0.7rem;color:var(--muted);margin-bottom:0.15rem;text-transform:uppercase;letter-spacing:.04em; }
+  .fonds-stat .val { font-size:0.95rem;font-weight:500; }
+  .fonds-tx-tbl { width:100%;border-collapse:collapse;font-size:0.8rem;margin-top:0.5rem; }
+  .fonds-tx-tbl th { text-align:left;color:var(--muted);font-weight:400;padding:0.3rem 0.5rem;border-bottom:1px solid var(--border);font-size:0.74rem; }
+  .fonds-tx-tbl td { padding:0.3rem 0.5rem;border-bottom:1px solid var(--border);vertical-align:middle; }
+  .fonds-tx-tbl tr:last-child td { border-bottom:none; }
+  .fonds-select { background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:2px 6px;font-size:0.74rem;color:var(--text);font-family:inherit;cursor:pointer;max-width:160px; }
 </style>
 </head>
 <body>
@@ -156,6 +173,16 @@
 <div id="report"></div>
 
 </main>
+
+<div id="fondsModal" style="display:none" onclick="if(event.target===this)closeFondsModal()">
+  <div class="fonds-panel">
+    <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:1rem;position:sticky;top:0;background:var(--surface);z-index:1">
+      <h2 style="font-family:Georgia,serif;font-size:1.2rem;font-weight:normal;flex:1">Mittelherkunft-Tracker</h2>
+      <button onclick="closeFondsModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--muted);line-height:1;padding:0">&#215;</button>
+    </div>
+    <div id="fondsModalBody" style="padding:1.5rem"></div>
+  </div>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.js"></script>
 <script>
@@ -655,6 +682,7 @@ function categorize(desc, cats) {
 // ── Report ────────────────────────────────────────────────
 function runReport() {
   const cats = getCats().filter(c=>c.name); saveCats(); saveIncCats(); saveExclude();
+  const activeFonds = loadFonds();
   // Exclude + categorize
   allTx.forEach(tx => {
     tx.excluded = isExcluded(tx.desc);
@@ -670,7 +698,9 @@ function runReport() {
   activeTx.forEach(tx => { if(!months[tx.monthKey]) months[tx.monthKey]=[]; months[tx.monthKey].push(tx); });
   const sorted = Object.keys(months).sort();
 
-  let html = '';
+  let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem">
+    <button style="background:var(--amber-light);color:var(--amber);border:1px solid rgba(186,117,23,0.3);border-radius:20px;padding:0.35rem 0.9rem;font-size:0.78rem;cursor:pointer;font-family:inherit" onclick="openFondsModal()">Mittelherkunft-Tracker</button>
+  </div>`;
 
   if(excludedCount > 0) {
     html += `<div style="background:var(--amber-light);color:var(--amber);border-radius:8px;padding:0.5rem 1rem;font-size:0.8rem;margin-bottom:1rem">
@@ -907,11 +937,14 @@ function runReport() {
     expSorted.forEach(tx => {
       const col = cats.find(c=>c.name===tx.cat)?.color||'#888';
       const purposeShort = tx.purpose ? (tx.purpose.substring(0,60)+(tx.purpose.length>60?'…':'')) : '';
+      const txk = getTxKey(tx);
+      const ff = activeFonds.find(fd => (fd.expenseKeys||[]).includes(txk));
+      const fondsBadge = ff ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:8px;background:var(--amber-light);color:var(--amber);margin-left:3px;white-space:nowrap">${esc(ff.name)}</span>` : '';
       html += `<tr data-cat="${esc(tx.cat)}">
         <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
         <td style="font-weight:500">${esc(tx.payee||tx.desc.substring(0,40))}</td>
         <td style="color:var(--muted)">${esc(purposeShort)}</td>
-        <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span></td>
+        <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span>${fondsBadge}</td>
         <td style="color:var(--muted);font-size:0.75rem">${esc(tx.bank)}</td>
         <td>&ndash;${fmt(tx.absAmt)}</td></tr>`;
     });
@@ -944,11 +977,14 @@ function runReport() {
       incSorted.forEach(tx=>{
         const col=currentIncCats.find(c=>c.name===tx.cat)?.color||INC_COLORS[0];
         const ps=tx.purpose?(tx.purpose.substring(0,60)+(tx.purpose.length>60?'…':'')):'';
+        const txk = getTxKey(tx);
+        const ff = activeFonds.find(fd => (fd.incomeKeys||[]).includes(txk));
+        const fondsBadge = ff ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:8px;background:var(--amber-light);color:var(--amber);margin-left:3px;white-space:nowrap">${esc(ff.name)}</span>` : '';
         html+=`<tr data-cat="${esc(tx.cat)}">
           <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
           <td style="font-weight:500">${esc(tx.payee||tx.desc.substring(0,40))}</td>
           <td style="color:var(--muted)">${esc(ps)}</td>
-          <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span></td>
+          <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span>${fondsBadge}</td>
           <td style="color:var(--muted);font-size:0.75rem">${esc(tx.bank)}</td>
           <td style="color:var(--success)">+${fmt(tx.absAmt)}</td></tr>`;
       });
@@ -1123,6 +1159,198 @@ function filterInc(mkSafe, cat, chipEl) {
     });
     summary.textContent=`${visible} Buchungen · Gesamt: +${fmt(sum)}`;
   }
+}
+
+// ── Mittelherkunft (Topf-Tracking) ───────────────────────
+function getTxKey(tx) {
+  const d = tx.date;
+  const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  return iso+'|'+tx.amount.toFixed(2)+'|'+(tx.payee||'')+'|'+(tx.purpose||'');
+}
+function loadFonds() {
+  try { const s = localStorage.getItem('mittelfonds_v1'); if(s) return JSON.parse(s); } catch(e){}
+  return [];
+}
+function saveFonds(fonds) {
+  try { localStorage.setItem('mittelfonds_v1', JSON.stringify(fonds)); } catch(e){}
+}
+function openFondsModal() {
+  renderFondsModal();
+  document.getElementById('fondsModal').style.display = 'block';
+}
+function closeFondsModal() {
+  document.getElementById('fondsModal').style.display = 'none';
+}
+function createFonds() {
+  const inp = document.getElementById('fondsNameInp');
+  const name = inp.value.trim();
+  if(!name) { inp.focus(); return; }
+  const fonds = loadFonds();
+  fonds.push({ id: 'f'+Date.now(), name, incomeKeys: [], expenseKeys: [] });
+  saveFonds(fonds);
+  inp.value = '';
+  renderFondsModal();
+  document.getElementById('fondsNameInp').focus();
+}
+function deleteFonds(id) {
+  if(!confirm('Topf löschen? Die Zuordnungen gehen verloren.')) return;
+  saveFonds(loadFonds().filter(f => f.id !== id));
+  renderFondsModal();
+}
+function renameFonds(id, name) {
+  const fonds = loadFonds();
+  const f = fonds.find(f => f.id === id);
+  if(f && name.trim()) { f.name = name.trim(); saveFonds(fonds); }
+}
+function assignTxToFonds(key, fondsId, isInc) {
+  const body = document.getElementById('fondsModalBody');
+  const scrollY = body.scrollTop;
+  const searchVal = document.getElementById('fondsSearch')?.value || '';
+  const filterVal = document.getElementById('fondsTxFilter')?.value || 'all';
+
+  const fonds = loadFonds();
+  fonds.forEach(f => {
+    f.incomeKeys  = (f.incomeKeys  || []).filter(k => k !== key);
+    f.expenseKeys = (f.expenseKeys || []).filter(k => k !== key);
+  });
+  if(fondsId) {
+    const f = fonds.find(f => f.id === fondsId);
+    if(f) (isInc ? f.incomeKeys : f.expenseKeys).push(key);
+  }
+  saveFonds(fonds);
+
+  renderFondsModal();
+  document.getElementById('fondsModalBody').scrollTop = scrollY;
+  const ns = document.getElementById('fondsSearch');
+  const nf = document.getElementById('fondsTxFilter');
+  if(ns) ns.value = searchVal;
+  if(nf) nf.value = filterVal;
+  filterFondsTx();
+}
+function filterFondsTx() {
+  const q   = (document.getElementById('fondsSearch')?.value || '').toLowerCase();
+  const flt = document.getElementById('fondsTxFilter')?.value || 'all';
+  document.querySelectorAll('#fondsTxTable tbody tr').forEach(tr => {
+    let show = true;
+    if(flt === 'inc'        && tr.dataset.type     !== 'inc') show = false;
+    if(flt === 'exp'        && tr.dataset.type     !== 'exp') show = false;
+    if(flt === 'unassigned' && tr.dataset.assigned !== 'no' ) show = false;
+    if(q && !(tr.dataset.search || '').includes(q))           show = false;
+    tr.style.display = show ? '' : 'none';
+  });
+}
+function renderFondsModal() {
+  const body = document.getElementById('fondsModalBody');
+  if(!body) return;
+  const fonds = loadFonds();
+  const activeTx = allTx.filter(t => !t.excluded);
+  const incTxs   = activeTx.filter(t => t.isIncome ).sort((a,b) => b.date - a.date);
+  const expTxs   = activeTx.filter(t => t.isExpense).sort((a,b) => b.date - a.date);
+
+  const keyToFonds = {};
+  fonds.forEach(f => {
+    (f.incomeKeys  || []).forEach(k => keyToFonds[k] = f.id);
+    (f.expenseKeys || []).forEach(k => keyToFonds[k] = f.id);
+  });
+
+  let html = `<div style="display:flex;gap:0.75rem;margin-bottom:1.5rem;align-items:center">
+    <input id="fondsNameInp" type="text" placeholder='Topf-Name, z.B. "Erbschaft Oma"'
+      style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.75rem;font-size:0.85rem;color:var(--text);font-family:inherit"
+      onkeydown="if(event.key==='Enter')createFonds()">
+    <button onclick="createFonds()" class="add-btn" style="margin:0;padding:0.5rem 1rem;white-space:nowrap">+ Neuer Topf</button>
+  </div>`;
+
+  if(!fonds.length) {
+    html += `<p style="color:var(--muted);font-size:0.85rem;text-align:center;padding:1.5rem 0">Noch keine Töpfe angelegt. Lege einen Topf an und weise Einnahmen &amp; Ausgaben zu.</p>`;
+  } else {
+    fonds.forEach(f => {
+      const incF   = incTxs.filter(tx => (f.incomeKeys  || []).includes(getTxKey(tx)));
+      const expF   = expTxs.filter(tx => (f.expenseKeys || []).includes(getTxKey(tx)));
+      const totInc = incF.reduce((s,t) => s + t.absAmt, 0);
+      const totExp = expF.reduce((s,t) => s + t.absAmt, 0);
+      const saldo  = totInc - totExp;
+      const sCol   = saldo >= 0 ? 'var(--success)' : 'var(--danger)';
+      html += `<div class="fonds-card">
+        <div class="fonds-card-hdr">
+          <input type="text" value="${esc(f.name)}"
+            onblur="renameFonds('${esc(f.id)}',this.value)"
+            onkeydown="if(event.key==='Enter')this.blur()">
+          <button class="del-btn" onclick="deleteFonds('${esc(f.id)}')">&#215;</button>
+        </div>
+        <div class="fonds-stats">
+          <div class="fonds-stat"><div class="lbl">Einnahmen</div>
+            <div class="val" style="color:var(--success)">+${fmt(totInc)}</div></div>
+          <div class="fonds-stat"><div class="lbl">Ausgaben</div>
+            <div class="val" style="color:var(--danger)">${totExp>0?'–'+fmt(totExp):'–'}</div></div>
+          <div class="fonds-stat"><div class="lbl">Verbleibend</div>
+            <div class="val" style="color:${sCol}">${saldo>=0?'+':''}${fmt(saldo)}</div></div>
+        </div>`;
+      if(incF.length || expF.length) {
+        const allF = [...incF, ...expF].sort((a,b) => b.date - a.date);
+        html += `<details style="margin-top:0.75rem"><summary style="font-size:0.78rem;color:var(--muted);cursor:pointer;user-select:none">
+          ${incF.length} Einnahme(n) &middot; ${expF.length} Ausgabe(n)</summary>
+          <table class="fonds-tx-tbl"><thead><tr><th>Datum</th><th>Transaktion</th><th style="text-align:right">Betrag</th></tr></thead><tbody>`;
+        allF.forEach(tx => {
+          html += `<tr>
+            <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+            <td>${esc((tx.payee||tx.desc||'').substring(0,50))}</td>
+            <td style="text-align:right;color:${tx.isIncome?'var(--success)':'var(--danger)'};white-space:nowrap">
+              ${tx.isIncome?'+':'–'}${fmt(tx.absAmt)}</td></tr>`;
+        });
+        html += `</tbody></table></details>`;
+      }
+      html += `</div>`;
+    });
+  }
+
+  const allRel = [...incTxs, ...expTxs].sort((a,b) => b.date - a.date);
+  if(allRel.length) {
+    html += `<div style="border-top:1px solid var(--border);margin-top:1rem;padding-top:1.25rem">
+      <h3 style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:1rem">Transaktionen zuordnen</h3>
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <input id="fondsSearch" type="text" placeholder="Suche&#8230;" oninput="filterFondsTx()"
+          style="flex:1;min-width:150px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.3rem 0.6rem;font-size:0.8rem;color:var(--text);font-family:inherit">
+        <select id="fondsTxFilter" onchange="filterFondsTx()"
+          style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.3rem 0.6rem;font-size:0.8rem;color:var(--text);font-family:inherit">
+          <option value="all">Alle</option>
+          <option value="inc">Nur Einnahmen</option>
+          <option value="exp">Nur Ausgaben</option>
+          <option value="unassigned">Nicht zugeordnet</option>
+        </select>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="fonds-tx-tbl" id="fondsTxTable">
+      <thead><tr><th>Datum</th><th>Typ</th><th>Absender / Empfänger</th><th>Verwendungszweck</th><th style="text-align:right">Betrag</th><th>Topf</th></tr></thead>
+      <tbody>`;
+    allRel.forEach(tx => {
+      const key  = getTxKey(tx);
+      const aFId = keyToFonds[key] || '';
+      const iI   = tx.isIncome;
+      const opts = fonds.map(f => `<option value="${esc(f.id)}"${f.id===aFId?' selected':''}>${esc(f.name)}</option>`).join('');
+      const ps   = (tx.purpose||'').substring(0,60);
+      html += `<tr data-type="${iI?'inc':'exp'}" data-assigned="${aFId?'yes':'no'}"
+        data-search="${esc(((tx.payee||'')+' '+(tx.purpose||'')).toLowerCase())}">
+        <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+        <td><span style="font-size:0.7rem;padding:1px 6px;border-radius:10px;white-space:nowrap;
+          background:${iI?'var(--success-light)':'var(--danger-light)'};
+          color:${iI?'var(--success)':'var(--danger)'}">
+          ${iI?'Einnahme':'Ausgabe'}</span></td>
+        <td style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${esc((tx.payee||tx.desc||'').substring(0,50))}</td>
+        <td style="color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:0.75rem">
+          ${esc(ps)}</td>
+        <td style="text-align:right;white-space:nowrap;color:${iI?'var(--success)':'var(--danger)'}">
+          ${iI?'+':'–'}${fmt(tx.absAmt)}</td>
+        <td><select class="fonds-select" data-txkey="${esc(key)}" data-isinc="${iI}"
+          onchange="assignTxToFonds(this.dataset.txkey,this.value,this.dataset.isinc==='true')">
+          <option value="">– kein Topf –</option>${opts}
+        </select></td>
+      </tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+  }
+
+  body.innerHTML = html;
 }
 
 renderCatGrid();
