@@ -129,6 +129,12 @@
   .fonds-tx-tbl td { padding:0.3rem 0.5rem;border-bottom:1px solid var(--border);vertical-align:middle; }
   .fonds-tx-tbl tr:last-child td { border-bottom:none; }
   .fonds-select { background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:2px 6px;font-size:0.74rem;color:var(--text);font-family:inherit;cursor:pointer;max-width:160px; }
+  .fonds-budget-bar { height:6px;border-radius:3px;background:var(--border);margin-top:0.6rem;overflow:hidden; }
+  .fonds-budget-bar > div { height:100%;border-radius:3px;transition:width 0.2s; }
+  .fonds-budget-inp { width:100%;background:transparent;border:none;font-size:0.95rem;font-weight:500;color:var(--text);font-family:inherit;padding:0;border-bottom:1px solid transparent; }
+  .fonds-budget-inp:focus { outline:none;border-bottom-color:var(--accent); }
+  #globalSearch { transition:border-color 0.15s; }
+  #globalSearch:focus { outline:none; border-color:var(--accent); }
 </style>
 </head>
 <body>
@@ -150,6 +156,38 @@
 
 <div id="dbStatus" style="align-items:center;gap:0.6rem;margin-top:0.75rem;padding:0.5rem 0.85rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:0.8rem;color:var(--muted);display:flex"></div>
 
+<div style="margin-top:0.75rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.5rem">
+  <div style="display:flex;align-items:center;gap:0.75rem;cursor:pointer" onclick="toggleCashForm()">
+    <strong style="flex:1;font-size:0.9rem">&#128181; Barausgabe manuell erfassen</strong>
+    <span id="cashFormToggleIcon" style="color:var(--muted);transition:transform 0.15s">&#9656;</span>
+  </div>
+  <div id="cashFormBody" style="display:none;margin-top:1rem">
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end">
+      <div style="display:flex;flex-direction:column;gap:0.3rem">
+        <label for="cashDate" style="font-size:0.75rem;color:var(--muted)">Datum</label>
+        <input type="date" id="cashDate" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.6rem;font-size:0.85rem;color:var(--text);font-family:inherit">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.3rem">
+        <label for="cashAmount" style="font-size:0.75rem;color:var(--muted)">Betrag (&euro;)</label>
+        <input type="number" id="cashAmount" step="0.01" min="0" placeholder="0,00" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.6rem;font-size:0.85rem;color:var(--text);font-family:inherit;width:110px">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.3rem;flex:1;min-width:180px">
+        <label for="cashPayee" style="font-size:0.75rem;color:var(--muted)">Beschreibung</label>
+        <input type="text" id="cashPayee" placeholder="z.B. Bäckerei, Wochenmarkt …" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.6rem;font-size:0.85rem;color:var(--text);font-family:inherit">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.3rem;flex:1;min-width:180px">
+        <label for="cashPurpose" style="font-size:0.75rem;color:var(--muted)">Verwendungszweck (optional)</label>
+        <input type="text" id="cashPurpose" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.6rem;font-size:0.85rem;color:var(--text);font-family:inherit">
+      </div>
+      <button id="cashSubmitBtn" onclick="saveCashExpense()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:0.45rem 1rem;font-size:0.85rem;font-weight:600;cursor:pointer;font-family:inherit">Hinzufügen</button>
+      <button id="cashCancelBtn" onclick="cancelCashEdit()" style="display:none;background:none;border:1px solid var(--border);border-radius:6px;padding:0.45rem 1rem;font-size:0.85rem;cursor:pointer;font-family:inherit;color:var(--muted)">Abbrechen</button>
+    </div>
+    <p style="font-size:0.75rem;color:var(--muted);margin-top:0.6rem">Wird als Ausgabe mit Bank &bdquo;Bar&ldquo; gespeichert und wie eine importierte Buchung kategorisiert.</p>
+    <div id="cashFormMsg" style="font-size:0.8rem;margin-top:0.5rem"></div>
+    <div id="manualTxList" style="margin-top:1rem"></div>
+  </div>
+</div>
+
 <div class="config-section">
   <h2>Kategorien &amp; Schlüsselwörter</h2>
   <p style="font-size:0.8rem;color:var(--muted);margin-bottom:1rem">Komma-getrennte Schlüsselwörter &middot; Groß/Kleinschreibung egal &middot; Erste Übereinstimmung gewinnt &middot; Letzte Kategorie = Fallback</p>
@@ -169,6 +207,33 @@
   <button class="add-btn" onclick="addIncCat()" style="background:var(--success-light);color:var(--success)">+ Einnahmen-Kategorie</button>
 </div>
 
+<div id="zeitraumSection" style="display:none;margin-top:1rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.5rem">
+  <div style="display:flex;align-items:center;gap:1.25rem;flex-wrap:wrap">
+    <span style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);flex-shrink:0">Zeitraum</span>
+    <div style="display:flex;align-items:center;gap:0.5rem">
+      <label for="filterFrom" style="font-size:0.8rem;color:var(--muted)">Von</label>
+      <input type="month" id="filterFrom" oninput="saveZeitraum();updateZeitraumSummary()"
+        style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.3rem 0.6rem;font-size:0.8rem;color:var(--text);font-family:inherit;cursor:pointer">
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem">
+      <label for="filterTo" style="font-size:0.8rem;color:var(--muted)">Bis</label>
+      <input type="month" id="filterTo" oninput="saveZeitraum();updateZeitraumSummary()"
+        style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.3rem 0.6rem;font-size:0.8rem;color:var(--text);font-family:inherit;cursor:pointer">
+    </div>
+    <span id="zeitraumSummary" style="font-size:0.8rem;color:var(--muted);flex:1"></span>
+    <button onclick="resetZeitraum()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:0.28rem 0.7rem;font-size:0.75rem;color:var(--muted);cursor:pointer;font-family:inherit;flex-shrink:0">Zurücksetzen</button>
+  </div>
+</div>
+
+<div id="searchSection" style="display:none;margin-top:0.75rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1rem 1.5rem">
+  <div style="position:relative">
+    <svg style="position:absolute;left:0.75rem;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="search" id="globalSearch" placeholder="Transaktionen durchsuchen …" oninput="searchTx()"
+      style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.75rem 0.5rem 2.25rem;font-size:0.85rem;color:var(--text);font-family:inherit">
+  </div>
+  <div id="searchResults" style="display:none;margin-top:1rem;max-height:440px;overflow-y:auto"></div>
+</div>
+
 <button class="run-btn" id="runBtn" onclick="runReport()" disabled>Bericht erstellen</button>
 <div id="report"></div>
 
@@ -177,7 +242,7 @@
 <div id="fondsModal" style="display:none" onclick="if(event.target===this)closeFondsModal()">
   <div class="fonds-panel">
     <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:1rem;position:sticky;top:0;background:var(--surface);z-index:1">
-      <h2 style="font-family:Georgia,serif;font-size:1.2rem;font-weight:normal;flex:1">Mittelherkunft-Tracker</h2>
+      <h2 style="font-family:Georgia,serif;font-size:1.2rem;font-weight:normal;flex:1">Budget-Töpfe</h2>
       <button onclick="closeFondsModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--muted);line-height:1;padding:0">&#215;</button>
     </div>
     <div id="fondsModalBody" style="padding:1.5rem"></div>
@@ -210,15 +275,23 @@ const DEFAULT_CATS = [
 ];
 
 function loadCats() {
+  const fromDb = dbGetSetting('expense_cats');
+  if (fromDb) return fromDb;
   try { const s = localStorage.getItem('ausgaben_cats_v3'); if(s) return JSON.parse(s); } catch(e){}
   return DEFAULT_CATS.map((c,i) => ({...c, color:COLORS[i%COLORS.length]}));
 }
-function saveCats() { try { localStorage.setItem('ausgaben_cats_v3', JSON.stringify(getCats())); } catch(e){} }
+function saveCats() {
+  const v = getCats();
+  if (sqlDb) dbSetSetting('expense_cats', v);
+  else try { localStorage.setItem('ausgaben_cats_v3', JSON.stringify(v)); } catch(e){}
+  configChanged = true; showPendingBanner();
+}
 function getCats() {
   return [...document.querySelectorAll('#catGrid .cat-rule')].map(el => ({
-    name: el.querySelector('.cat-name-in').value.trim(),
-    kw:   el.querySelector('.cat-kw-in').value.trim(),
-    color: el.dataset.color,
+    name:   el.querySelector('.cat-name-in').value.trim(),
+    kw:     el.querySelector('.cat-kw-in').value.trim(),
+    color:  el.dataset.color,
+    budget: parseFloat(el.querySelector('.cat-budget-in')?.value) || 0,
   }));
 }
 function renderCatGrid() {
@@ -231,12 +304,22 @@ function appendCatEl(grid, cat, i, colors, saveFn) {
   const col = cat.color || colors[i%colors.length];
   const d = document.createElement('div');
   d.className = 'cat-rule'; d.dataset.color = col;
+  const budgetField = saveFn === 'saveCats' ? `
+  <div style="display:flex;align-items:center;gap:0.4rem;margin-top:4px">
+    <span class="kw-in" style="font-size:0.72rem;white-space:nowrap">Budget&nbsp;€/Mo.</span>
+    <input type="number" class="cat-budget-in" value="${cat.budget > 0 ? cat.budget : ''}" placeholder="–" min="0" step="10"
+      style="flex:1;text-align:right;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-size:0.78rem;padding:0.15rem 0;font-family:inherit"
+      oninput="${saveFn}()" onchange="${saveFn}()">
+  </div>` : '';
   d.innerHTML = `<div class="name-row">
     <span style="width:10px;height:10px;border-radius:2px;background:${col};flex-shrink:0"></span>
     <input type="text" class="cat-name-in" value="${esc(cat.name)}" placeholder="Kategoriename" oninput="${saveFn}()" onchange="${saveFn}()">
+    <button class="del-btn" onclick="moveCat(this,true,'${saveFn}')" title="Nach oben" style="font-size:0.65rem;opacity:0.5;padding:0 1px">▲</button>
+    <button class="del-btn" onclick="moveCat(this,false,'${saveFn}')" title="Nach unten" style="font-size:0.65rem;opacity:0.5;padding:0 1px">▼</button>
     <button class="del-btn" onclick="this.closest('.cat-rule').remove();${saveFn}()">×</button>
   </div>
-  <input type="text" class="cat-kw-in kw-in" value="${esc(cat.kw)}" placeholder="schlüsselwort1, word2, …" oninput="${saveFn}()" onchange="${saveFn}()">`;
+  <input type="text" class="cat-kw-in kw-in" value="${esc(cat.kw)}" placeholder="schlüsselwort1, word2, …" oninput="${saveFn}()" onchange="${saveFn}()">
+  ${budgetField}`;
   grid.appendChild(d);
 }
 function addCat() {
@@ -244,6 +327,18 @@ function addCat() {
   appendCatEl(document.getElementById('catGrid'),{name:'',kw:'',color:COLORS[cats.length%COLORS.length]},cats.length,COLORS,'saveCats');
   saveCats();
   document.querySelector('#catGrid .cat-rule:last-child .cat-name-in').focus();
+}
+
+function moveCat(btn, up, saveFn) {
+  const rule = btn.closest('.cat-rule');
+  const grid = rule.parentElement;
+  const rules = [...grid.querySelectorAll(':scope > .cat-rule')];
+  const idx = rules.indexOf(rule);
+  const target = up ? idx - 1 : idx + 1;
+  if (target < 0 || target >= rules.length) return;
+  if (up) grid.insertBefore(rule, rules[target]);
+  else grid.insertBefore(rules[target], rule);
+  window[saveFn]();
 }
 
 // ── Einnahmen-Kategorien ─────────────────────────────────
@@ -259,11 +354,16 @@ const DEFAULT_INC_CATS = [
 ];
 
 function loadIncCats() {
+  const fromDb = dbGetSetting('income_cats');
+  if (fromDb) return fromDb;
   try { const s = localStorage.getItem('inc_cats_v1'); if(s) return JSON.parse(s); } catch(e){}
   return DEFAULT_INC_CATS.map((c,i)=>({...c, color:INC_COLORS[i%INC_COLORS.length]}));
 }
 function saveIncCats() {
-  try { localStorage.setItem('inc_cats_v1', JSON.stringify(getIncCats())); } catch(e){}
+  const v = getIncCats();
+  if (sqlDb) dbSetSetting('income_cats', v);
+  else try { localStorage.setItem('inc_cats_v1', JSON.stringify(v)); } catch(e){}
+  configChanged = true; showPendingBanner();
 }
 function getIncCats() {
   return [...document.querySelectorAll('#incCatGrid .cat-rule')].map(el=>({
@@ -294,10 +394,27 @@ function categorizeInc(desc) {
   return incCats[incCats.length-1]?.name||'Sonstige Einnahmen';
 }
 
+function loadCatOverrides() {
+  const fromDb = dbGetSetting('cat_overrides');
+  if (fromDb) return fromDb;
+  try { const s = localStorage.getItem('cat_overrides_v1'); if(s) return JSON.parse(s); } catch(e){}
+  return {};
+}
+function saveCatOverride(key, cat) {
+  const ov = loadCatOverrides();
+  if(cat) ov[key] = cat; else delete ov[key];
+  if (sqlDb) dbSetSetting('cat_overrides', ov);
+  else try { localStorage.setItem('cat_overrides_v1', JSON.stringify(ov)); } catch(e){}
+}
 function saveExclude() {
-  try { localStorage.setItem('ausgaben_exclude', document.getElementById('excludeKw').value); } catch(e){}
+  const v = document.getElementById('excludeKw').value;
+  if (sqlDb) dbSetSetting('exclude_kw', v);
+  else try { localStorage.setItem('ausgaben_exclude', v); } catch(e){}
+  configChanged = true; showPendingBanner();
 }
 function loadExclude() {
+  const fromDb = dbGetSetting('exclude_kw');
+  if (fromDb !== null) return fromDb;
   try { return localStorage.getItem('ausgaben_exclude') || 'umbuchung,übertrag,intern,volksbank plus,dz bank'; } catch(e){ return ''; }
 }
 function getExcludeKws() {
@@ -462,6 +579,56 @@ async function idbGet(key) {
   } catch { return null; }
 }
 
+// ── Settings-Persistenz (DB oder localStorage fallback) ──
+let _dbSaveTimer = null;
+function scheduleDbSave() {
+  clearTimeout(_dbSaveTimer);
+  _dbSaveTimer = setTimeout(() => saveDbToFile(), 1500);
+}
+
+function dbGetSetting(key) {
+  if (!sqlDb) return null;
+  try {
+    const res = sqlDb.exec('SELECT value FROM settings WHERE key = ?', [key]);
+    if (res.length && res[0].values.length) return JSON.parse(res[0].values[0][0]);
+  } catch(e) {}
+  return null;
+}
+
+function dbSetSetting(key, value) {
+  if (!sqlDb) return;
+  sqlDb.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, JSON.stringify(value)]);
+  scheduleDbSave();
+}
+
+function migrateLocalStorageToDb() {
+  const existing = new Set(
+    (sqlDb.exec('SELECT key FROM settings')[0]?.values || []).map(([k]) => k)
+  );
+  const migrations = [
+    { dbKey: 'expense_cats',  lsKey: 'ausgaben_cats_v3', isJson: true },
+    { dbKey: 'income_cats',   lsKey: 'inc_cats_v1',      isJson: true },
+    { dbKey: 'cat_overrides', lsKey: 'cat_overrides_v1', isJson: true },
+    { dbKey: 'exclude_kw',    lsKey: 'ausgaben_exclude',  isJson: false },
+    { dbKey: 'fonds',         lsKey: 'mittelfonds_v1',    isJson: true },
+    { dbKey: 'zeitraum',      lsKey: 'zeitraum_filter',   isJson: true },
+  ];
+  migrations.forEach(({ dbKey, lsKey, isJson }) => {
+    if (existing.has(dbKey)) return;
+    const raw = localStorage.getItem(lsKey);
+    if (raw === null) return;
+    try { dbSetSetting(dbKey, isJson ? JSON.parse(raw) : raw); } catch(e) {}
+  });
+}
+
+function reloadAppFromDb() {
+  renderCatGrid();
+  renderIncCatGrid();
+  document.getElementById('excludeKw').value = loadExclude();
+  loadZeitraum();
+  renderManualTxList();
+}
+
 // ── SQLite + Datei ────────────────────────────────────────
 let sqlDb = null;
 let dbFileHandle = null;
@@ -469,7 +636,8 @@ let sqlJsModule = null;
 let dbInitPromise = null;
 
 const DB_FILE_TYPES = [{ description: 'SQLite-Datenbank', accept: { 'application/x-sqlite3': ['.db'] } }];
-const CREATE_SCHEMA = `CREATE TABLE IF NOT EXISTS transactions (
+const CREATE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS transactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   date_iso TEXT NOT NULL,
   amount REAL NOT NULL,
@@ -477,6 +645,10 @@ const CREATE_SCHEMA = `CREATE TABLE IF NOT EXISTS transactions (
   purpose TEXT NOT NULL DEFAULT '',
   bank TEXT NOT NULL DEFAULT '',
   UNIQUE(date_iso, amount, payee, purpose, bank)
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
 )`;
 
 async function saveDbToFile() {
@@ -491,7 +663,9 @@ async function loadAndOpenHandle(handle) {
   const buf = new Uint8Array(await file.arrayBuffer());
   sqlDb = buf.byteLength > 0 ? new sqlJsModule.Database(buf) : new sqlJsModule.Database();
   sqlDb.run(CREATE_SCHEMA);
+  migrateLocalStorageToDb();
   loadAllTxFromDb();
+  reloadAppFromDb();
 }
 
 async function initDB() {
@@ -523,8 +697,10 @@ async function createDbFile() {
     await idbPut('fileHandle', handle);
     sqlDb = new sqlJsModule.Database();
     sqlDb.run(CREATE_SCHEMA);
+    migrateLocalStorageToDb();
     await saveDbToFile();
     loadAllTxFromDb();
+    reloadAppFromDb();
     updateDbStatus();
   } catch (e) { if (e.name !== 'AbortError') console.error(e); }
 }
@@ -556,25 +732,34 @@ function getTxCount() {
 function loadAllTxFromDb() {
   if (!sqlDb) return;
   allTx = [];
-  const res = sqlDb.exec('SELECT date_iso, amount, payee, purpose, bank FROM transactions ORDER BY date_iso, rowid');
-  if (!res.length) return;
-  res[0].values.forEach(([date_iso, amount, payee, purpose, bank]) => {
-    const d = parseDate(date_iso);
-    if (!d) return;
-    allTx.push({
-      date: d,
-      monthKey: d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'),
-      amount,
-      absAmt: Math.abs(amount),
-      isExpense: amount < 0,
-      isIncome: amount > 0,
-      payee: payee || '',
-      purpose: purpose || '',
-      desc: [payee, purpose].filter(Boolean).join(' · '),
-      bank: bank || '',
-      cat: ''
+  const res = sqlDb.exec('SELECT id, date_iso, amount, payee, purpose, bank FROM transactions ORDER BY date_iso, rowid');
+  if (res.length) {
+    res[0].values.forEach(([id, date_iso, amount, payee, purpose, bank]) => {
+      const d = parseDate(date_iso);
+      if (!d) return;
+      allTx.push({
+        id,
+        date: d,
+        monthKey: d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'),
+        amount,
+        absAmt: Math.abs(amount),
+        isExpense: amount < 0,
+        isIncome: amount > 0,
+        payee: payee || '',
+        purpose: purpose || '',
+        desc: [payee, purpose].filter(Boolean).join(' · '),
+        bank: bank || '',
+        cat: ''
+      });
     });
-  });
+  }
+  const vis = allTx.length > 0 ? '' : 'none';
+  const zEl = document.getElementById('zeitraumSection');
+  if (zEl) zEl.style.display = vis;
+  const sEl = document.getElementById('searchSection');
+  if (sEl) sEl.style.display = vis;
+  updateZeitraumHints();
+  renderManualTxList();
 }
 
 const _btn = 'border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:0.75rem;cursor:pointer;font-family:inherit;background:none';
@@ -613,12 +798,55 @@ async function clearDb() {
   allTx = [];
   document.getElementById('fileTags').innerHTML = '';
   document.getElementById('report').innerHTML = '';
+  document.getElementById('globalSearch').value = '';
+  document.getElementById('searchResults').style.display = 'none';
+  document.getElementById('searchResults').innerHTML = '';
+  const section = document.getElementById('zeitraumSection');
+  if (section) section.style.display = 'none';
+  const sSection = document.getElementById('searchSection');
+  if (sSection) sSection.style.display = 'none';
+  renderManualTxList();
   updateDbStatus();
 }
 
 // ── State ────────────────────────────────────────────────
 let allTx = [];
 let chartInstances = {};
+let fondsChartInstances = {};
+let pendingCatChanges = 0;
+let configChanged = false;
+let suppressPendingBanner = false;
+
+function showPendingBanner() {
+  if (suppressPendingBanner) return;
+  if (!configChanged && pendingCatChanges === 0) return;
+  if (!document.getElementById('report').children.length) return;
+  let bar = document.getElementById('pending-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'pending-bar';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9990;background:var(--accent);color:#fff;padding:0.6rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;font-size:0.85rem;box-shadow:0 -2px 12px rgba(0,0,0,0.2)';
+    document.body.appendChild(bar);
+  }
+  let msg;
+  if (configChanged && pendingCatChanges > 0) {
+    msg = `Konfiguration &amp; ${pendingCatChanges === 1 ? '1 Buchung' : pendingCatChanges + ' Buchungen'} geändert`;
+  } else if (configChanged) {
+    msg = 'Kategorie-Konfiguration geändert';
+  } else {
+    const n = pendingCatChanges;
+    msg = `${n === 1 ? '1 Buchung' : n + ' Buchungen'} umkategorisiert`;
+  }
+  bar.innerHTML = `<span>${msg} – Bericht neu erstellen</span>
+    <button onclick="runReport()" style="background:#fff;color:var(--accent);border:none;padding:0.3rem 1rem;border-radius:5px;cursor:pointer;font-family:inherit;font-weight:600;font-size:0.85rem;white-space:nowrap">Bericht aktualisieren</button>`;
+}
+
+function hidePendingBanner() {
+  const bar = document.getElementById('pending-bar');
+  if (bar) bar.remove();
+  pendingCatChanges = 0;
+  configChanged = false;
+}
 
 function handleFiles(files) {
   const tags = document.getElementById('fileTags');
@@ -662,6 +890,148 @@ function handleFiles(files) {
   })().catch(err => console.error('Fehler beim Verarbeiten:', err));
 }
 
+let editingCashId = null;
+
+function toggleCashForm() {
+  const body = document.getElementById('cashFormBody');
+  const icon = document.getElementById('cashFormToggleIcon');
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  icon.style.transform = open ? '' : 'rotate(90deg)';
+  if (!open && !document.getElementById('cashDate').value) {
+    const now = new Date();
+    document.getElementById('cashDate').value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+  }
+}
+
+function cashFormMsg(text, color) {
+  const msgEl = document.getElementById('cashFormMsg');
+  msgEl.textContent = text;
+  msgEl.style.color = color || '';
+}
+
+async function saveCashExpense() {
+  cashFormMsg('');
+
+  if (dbInitPromise) try { await dbInitPromise; } catch {}
+  if (!sqlDb) {
+    cashFormMsg(!dbFileHandle
+      ? 'Bitte zuerst eine Datenbankdatei auswählen oder erstellen.'
+      : 'Bitte zuerst den Dateizugriff erteilen.', 'var(--amber)');
+    return;
+  }
+
+  const dateStr = document.getElementById('cashDate').value;
+  const amountRaw = parseFloat(document.getElementById('cashAmount').value.replace(',', '.'));
+  const payee = document.getElementById('cashPayee').value.trim();
+  const purpose = document.getElementById('cashPurpose').value.trim();
+
+  if (!dateStr) return cashFormMsg('Bitte ein Datum angeben.', 'var(--danger)');
+  if (isNaN(amountRaw) || amountRaw <= 0) return cashFormMsg('Bitte einen gültigen Betrag angeben.', 'var(--danger)');
+  if (!payee) return cashFormMsg('Bitte eine Beschreibung angeben.', 'var(--danger)');
+
+  const amount = -Math.abs(amountRaw);
+
+  if (editingCashId != null) {
+    try {
+      sqlDb.run(
+        'UPDATE transactions SET date_iso=?, amount=?, payee=?, purpose=? WHERE id=?',
+        [dateStr, amount, payee, purpose, editingCashId]
+      );
+    } catch (e) {
+      return cashFormMsg('Diese Änderung ergibt eine bereits vorhandene Buchung (Duplikat).', 'var(--amber)');
+    }
+    await saveDbToFile();
+    loadAllTxFromDb();
+    updateDbStatus();
+    cancelCashEdit();
+    cashFormMsg('✓ Barausgabe aktualisiert.', 'var(--success)');
+    configChanged = true; showPendingBanner();
+    return;
+  }
+
+  sqlDb.run(
+    'INSERT OR IGNORE INTO transactions (date_iso, amount, payee, purpose, bank) VALUES (?, ?, ?, ?, ?)',
+    [dateStr, amount, payee, purpose, 'Bar']
+  );
+  const added = sqlDb.getRowsModified() > 0;
+
+  await saveDbToFile();
+  loadAllTxFromDb();
+  updateDbStatus();
+
+  if (added) {
+    cashFormMsg(`✓ Barausgabe über ${amountRaw.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} € hinzugefügt.`, 'var(--success)');
+    document.getElementById('cashAmount').value = '';
+    document.getElementById('cashPayee').value = '';
+    document.getElementById('cashPurpose').value = '';
+    configChanged = true; showPendingBanner();
+  } else {
+    cashFormMsg('Diese Buchung existiert bereits (Duplikat).', 'var(--amber)');
+  }
+}
+
+function editCashExpense(id) {
+  const tx = allTx.find(t => t.id === id);
+  if (!tx) return;
+  editingCashId = id;
+  const iso = tx.date.getFullYear() + '-' + String(tx.date.getMonth()+1).padStart(2,'0') + '-' + String(tx.date.getDate()).padStart(2,'0');
+  document.getElementById('cashDate').value = iso;
+  document.getElementById('cashAmount').value = tx.absAmt.toFixed(2);
+  document.getElementById('cashPayee').value = tx.payee;
+  document.getElementById('cashPurpose').value = tx.purpose;
+  document.getElementById('cashSubmitBtn').textContent = 'Aktualisieren';
+  document.getElementById('cashCancelBtn').style.display = '';
+  cashFormMsg('');
+  const body = document.getElementById('cashFormBody');
+  if (body.style.display === 'none') toggleCashForm();
+  document.getElementById('cashPayee').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function cancelCashEdit() {
+  editingCashId = null;
+  document.getElementById('cashAmount').value = '';
+  document.getElementById('cashPayee').value = '';
+  document.getElementById('cashPurpose').value = '';
+  document.getElementById('cashSubmitBtn').textContent = 'Hinzufügen';
+  document.getElementById('cashCancelBtn').style.display = 'none';
+  cashFormMsg('');
+}
+
+async function deleteCashExpense(id) {
+  if (!sqlDb) return;
+  if (!confirm('Diese Barausgabe unwiderruflich löschen?')) return;
+  sqlDb.run('DELETE FROM transactions WHERE id=?', [id]);
+  await saveDbToFile();
+  if (editingCashId === id) cancelCashEdit();
+  loadAllTxFromDb();
+  updateDbStatus();
+  configChanged = true; showPendingBanner();
+}
+
+function renderManualTxList() {
+  const el = document.getElementById('manualTxList');
+  if (!el) return;
+  const manual = allTx.filter(t => t.bank === 'Bar').slice().sort((a,b) => b.date - a.date || b.id - a.id);
+  if (!manual.length) { el.innerHTML = ''; return; }
+  const cats = getCats().filter(c=>c.name);
+  const overrides = loadCatOverrides();
+  el.innerHTML = `<div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.4rem">Bisherige manuelle Einträge (${manual.length})</div>` +
+    manual.map(t => {
+      const cat = overrides[getTxKey(t)] || categorize(t.desc, cats);
+      const col = cats.find(c=>c.name===cat)?.color || '#888';
+      return `
+      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.82rem">
+        <span style="color:var(--muted);white-space:nowrap">${esc(t.date.toLocaleDateString('de-DE'))}</span>
+        <span style="white-space:nowrap;color:var(--danger)">${t.absAmt.toLocaleString('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2})} €</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</span>
+        <span class="badge" style="background:${col}22;color:${col};white-space:nowrap">${esc(cat)}</span>
+        <button onclick="editCashExpense(${t.id})" title="Bearbeiten" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:0.9rem;padding:2px 4px">&#9998;</button>
+        <button onclick="deleteCashExpense(${t.id})" title="Löschen" style="background:none;border:none;cursor:pointer;color:var(--danger);font-size:0.9rem;padding:2px 4px">&#128465;</button>
+      </div>`;
+    }).join('');
+}
+
 const dz = document.getElementById('dropZone');
 dz.addEventListener('click', () => document.getElementById('fileInput').click());
 dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
@@ -679,28 +1049,276 @@ function categorize(desc, cats) {
   return cats[cats.length-1]?.name || 'Sonstiges';
 }
 
+function getAllMatches(desc, cats) {
+  const low = (desc||'').toLowerCase();
+  const matches = [];
+  for (const c of cats) {
+    if (!c.kw) continue;
+    if (c.kw.split(',').map(k=>k.trim().toLowerCase()).filter(Boolean).some(k=>low.includes(k)))
+      matches.push(c);
+  }
+  return matches;
+}
+
+// ── Zeitraumfilter ────────────────────────────────────────
+function loadZeitraum() {
+  let data = dbGetSetting('zeitraum');
+  if (!data) {
+    try { const s = localStorage.getItem('zeitraum_filter'); if(s) data = JSON.parse(s); } catch(e){}
+  }
+  if (data) { document.getElementById('filterFrom').value = data.from||''; document.getElementById('filterTo').value = data.to||''; }
+  updateZeitraumSummary();
+}
+function saveZeitraum() {
+  const v = {from: document.getElementById('filterFrom').value, to: document.getElementById('filterTo').value};
+  if (sqlDb) dbSetSetting('zeitraum', v);
+  else try { localStorage.setItem('zeitraum_filter', JSON.stringify(v)); } catch(e){}
+}
+function resetZeitraum() {
+  document.getElementById('filterFrom').value = '';
+  document.getElementById('filterTo').value   = '';
+  saveZeitraum();
+  updateZeitraumSummary();
+}
+function updateZeitraumHints() {
+  if (!allTx.length) return;
+  const months = allTx.map(t => t.monthKey).sort();
+  const minM = months[0], maxM = months[months.length - 1];
+  const fe = document.getElementById('filterFrom'), te = document.getElementById('filterTo');
+  if (!fe || !te) return;
+  fe.min = minM; fe.max = maxM;
+  te.min = minM; te.max = maxM;
+  updateZeitraumSummary();
+}
+function updateZeitraumSummary() {
+  const from = document.getElementById('filterFrom')?.value;
+  const to   = document.getElementById('filterTo')?.value;
+  const el   = document.getElementById('zeitraumSummary');
+  if (!el) return;
+  if (!from && !to) { el.textContent = 'Gesamter Zeitraum'; return; }
+  const fmtM = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('de-DE',{month:'short',year:'numeric'}); };
+  el.textContent = [from && 'ab ' + fmtM(from), to && 'bis ' + fmtM(to)].filter(Boolean).join(' · ');
+}
+
+// ── Globalsuche ──────────────────────────────────────────
+function searchTx() {
+  const q = (document.getElementById('globalSearch').value || '').trim().toLowerCase();
+  const resultsEl = document.getElementById('searchResults');
+  if (q.length < 2) { resultsEl.style.display = 'none'; resultsEl.innerHTML = ''; return; }
+
+  const cats = getCats().filter(c => c.name);
+  const overrides = loadCatOverrides();
+  const filterFrom = document.getElementById('filterFrom').value;
+  const filterTo   = document.getElementById('filterTo').value;
+  const inRange = tx => (!filterFrom || tx.monthKey >= filterFrom) && (!filterTo || tx.monthKey <= filterTo);
+  const matches = allTx
+    .filter(tx => !isExcluded(tx.desc) && inRange(tx) &&
+      (tx.payee.toLowerCase().includes(q) || tx.purpose.toLowerCase().includes(q)))
+    .map(tx => {
+      let cat = tx.isExpense ? categorize(tx.desc, cats) : categorizeInc(tx.desc);
+      const k = getTxKey(tx);
+      if (overrides[k]) cat = overrides[k];
+      return { ...tx, cat };
+    })
+    .sort((a, b) => b.date - a.date);
+
+  if (!matches.length) {
+    resultsEl.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;text-align:center;padding:1rem 0">Keine Treffer für „${esc(q)}"</p>`;
+    resultsEl.style.display = '';
+    return;
+  }
+
+  const totExp = matches.filter(t => t.isExpense).reduce((s,t) => s + t.absAmt, 0);
+  const totInc = matches.filter(t => t.isIncome).reduce((s,t) => s + t.absAmt, 0);
+
+  let html = `<div style="display:flex;gap:1.25rem;flex-wrap:wrap;margin-bottom:0.75rem;font-size:0.8rem;color:var(--muted);align-items:center">
+    <span><strong style="color:var(--text)">${matches.length}</strong> Ergebnis${matches.length!==1?'se':''}</span>
+    ${totExp>0?`<span>Ausgaben: <strong style="color:var(--danger)">–${fmt(totExp)}</strong></span>`:''}
+    ${totInc>0?`<span>Einnahmen: <strong style="color:var(--success)">+${fmt(totInc)}</strong></span>`:''}
+  </div>
+  <div class="tx-wrap"><table class="tx-table">
+    <thead><tr><th>Datum</th><th>Empfänger</th><th>Verwendungszweck</th><th>Kategorie</th><th>Konto</th><th>Betrag</th></tr></thead>
+    <tbody>`;
+
+  matches.forEach(tx => {
+    const catObj = cats.find(c => c.name === tx.cat);
+    const col = catObj?.color || '#888';
+    const purposeFull = tx.purpose || '';
+    const matchIdx = purposeFull.toLowerCase().indexOf(q);
+    let hlPurpose;
+    if (purposeFull.length <= 60 || matchIdx < 0 || matchIdx < 50) {
+      const clip = purposeFull.length > 60 ? purposeFull.substring(0, 60) + '…' : purposeFull;
+      hlPurpose = matchIdx >= 0 && matchIdx < 60 ? hlRaw(purposeFull.substring(0, 60), q) + (purposeFull.length > 60 ? '<span style="opacity:.5">…</span>' : '') : esc(clip);
+    } else {
+      const start = Math.max(0, matchIdx - 15);
+      const end = Math.min(purposeFull.length, matchIdx + q.length + 20);
+      hlPurpose = (start > 0 ? '<span style="opacity:.5">…</span>' : '') + hlRaw(purposeFull.substring(start, end), q) + (end < purposeFull.length ? '<span style="opacity:.5">…</span>' : '');
+    }
+    html += `<tr>
+      <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+      <td style="font-weight:500">${hlRaw(tx.payee||'', q)}</td>
+      <td style="color:var(--muted)">${hlPurpose}</td>
+      <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span></td>
+      <td style="color:var(--muted);font-size:0.75rem">${esc(tx.bank)}</td>
+      <td style="color:${tx.isIncome?'var(--success)':'var(--danger)'};white-space:nowrap">${tx.isIncome?'+':'–'}${fmt(tx.absAmt)}</td>
+    </tr>`;
+  });
+
+  resultsEl.innerHTML = html + `</tbody></table></div>`;
+  resultsEl.style.display = '';
+}
+
+function hlRaw(raw, q) {
+  if (!q || !raw) return esc(raw || '');
+  const lo = raw.toLowerCase();
+  let out = '', pos = 0, idx;
+  while ((idx = lo.indexOf(q, pos)) >= 0) {
+    out += esc(raw.substring(pos, idx));
+    out += `<mark style="background:var(--amber-light);color:var(--amber);border-radius:2px;padding:0 1px">${esc(raw.substring(idx, idx+q.length))}</mark>`;
+    pos = idx + q.length;
+  }
+  return out + esc(raw.substring(pos));
+}
+
+// ── Mehrdeutigkeit-Modal ──────────────────────────────────
+function showAmbiguityModal(ambiguous, onConfirm) {
+  document.getElementById('ambiguityModal')?.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'ambiguityModal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:1001;background:rgba(0,0,0,0.55);overflow-y:auto;padding:2rem 1rem';
+
+  let html = `<div style="max-width:720px;margin:0 auto;background:var(--surface);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,0.35)">
+    <div style="padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:1rem;position:sticky;top:0;background:var(--surface);z-index:1">
+      <div style="flex:1">
+        <h2 style="font-family:Georgia,serif;font-size:1.1rem;font-weight:normal;margin-bottom:0.25rem">Mehrfache Kategorie-Treffer</h2>
+        <p style="font-size:0.78rem;color:var(--muted)">${ambiguous.length} Buchung${ambiguous.length!==1?'en haben':'hat'} mehr als einen Treffer &ndash; bitte je eine Kategorie wählen</p>
+      </div>
+      <button onclick="document.getElementById('ambiguityModal').remove()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--muted);line-height:1;padding:0;flex-shrink:0">&#215;</button>
+    </div>
+    <div style="padding:0.5rem 1.5rem 1rem;max-height:60vh;overflow-y:auto">`;
+
+  ambiguous.forEach((item, idx) => {
+    const {tx, matches} = item;
+    const dateStr = tx.date.toLocaleDateString('de-DE');
+    const payee = (tx.payee || tx.desc || '').substring(0, 45);
+    const purpose = tx.purpose ? tx.purpose.substring(0, 70) : '';
+    const signHtml = tx.isExpense
+      ? `<span style="color:var(--danger);white-space:nowrap">–${fmt(tx.absAmt)}</span>`
+      : `<span style="color:var(--success);white-space:nowrap">+${fmt(tx.absAmt)}</span>`;
+
+    html += `<div style="padding:0.9rem 0;${idx>0?'border-top:1px solid var(--border)':''}">
+      <div style="display:flex;align-items:baseline;gap:0.6rem;margin-bottom:${purpose?'0.25rem':'0.5rem'}">
+        <span style="font-size:0.75rem;color:var(--muted);white-space:nowrap;flex-shrink:0">${esc(dateStr)}</span>
+        <span style="font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(payee)}">${esc(payee)}</span>
+        ${signHtml}
+      </div>`;
+    if (purpose) {
+      html += `<div style="font-size:0.75rem;color:var(--muted);margin-bottom:0.5rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(purpose)}</div>`;
+    }
+    html += `<div style="display:flex;flex-wrap:wrap;gap:0.4rem 0.6rem">`;
+    matches.forEach((cat, ci) => {
+      const col = cat.color || '#888';
+      const rid = `ambig_${idx}_${ci}`;
+      html += `<label for="${rid}" style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;border:1.5px solid ${col}55;cursor:pointer;font-size:0.8rem;user-select:none">
+        <input type="radio" id="${rid}" name="ambig_${idx}" value="${esc(cat.name)}"${ci===0?' checked':''} style="accent-color:${col};cursor:pointer">
+        <span style="width:7px;height:7px;border-radius:50%;background:${col};flex-shrink:0"></span>
+        ${esc(cat.name)}
+      </label>`;
+    });
+    html += `</div></div>`;
+  });
+
+  html += `</div>
+    <div style="padding:1rem 1.5rem;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:0.75rem;background:var(--surface)">
+      <button onclick="document.getElementById('ambiguityModal').remove()"
+        style="background:none;border:1px solid var(--border);border-radius:8px;padding:0.5rem 1.25rem;font-size:0.85rem;cursor:pointer;font-family:inherit;color:var(--muted)">Abbrechen</button>
+      <button id="ambiguityConfirmBtn"
+        style="background:var(--text);color:var(--bg);border:none;border-radius:8px;padding:0.5rem 1.5rem;font-size:0.85rem;cursor:pointer;font-family:inherit">
+        Übernehmen &amp; Bericht erstellen</button>
+    </div>
+  </div>`;
+
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+
+  document.getElementById('ambiguityConfirmBtn').onclick = () => {
+    ambiguous.forEach((item, idx) => {
+      const sel = modal.querySelector(`input[name="ambig_${idx}"]:checked`);
+      if (sel) saveCatOverride(item.key, sel.value);
+    });
+    modal.remove();
+    onConfirm();
+  };
+}
+
 // ── Report ────────────────────────────────────────────────
 function runReport() {
+  hidePendingBanner();
+  suppressPendingBanner = true;
   const cats = getCats().filter(c=>c.name); saveCats(); saveIncCats(); saveExclude();
+  suppressPendingBanner = false;
+  configChanged = false;
+  const overrides = loadCatOverrides();
+
+  // Vorab-Prüfung: Buchungen mit mehrfachen Keyword-Treffern und ohne manuelles Override
+  {
+    const fFrom = document.getElementById('filterFrom').value;
+    const fTo   = document.getElementById('filterTo').value;
+    const inR   = tx => (!fFrom || tx.monthKey >= fFrom) && (!fTo || tx.monthKey <= fTo);
+    const incCats = getIncCats().filter(c => c.name);
+    const ambiguous = [];
+    allTx.filter(tx => !isExcluded(tx.desc) && inR(tx)).forEach(tx => {
+      const k = getTxKey(tx);
+      if (overrides[k]) return;
+      const catList = tx.isExpense ? cats : incCats;
+      const matches = getAllMatches(tx.desc, catList);
+      if (matches.length > 1) ambiguous.push({ tx, matches, key: k });
+    });
+    if (ambiguous.length > 0) {
+      showAmbiguityModal(ambiguous, () => runReport());
+      return;
+    }
+  }
+
   const activeFonds = loadFonds();
   // Exclude + categorize
   allTx.forEach(tx => {
     tx.excluded = isExcluded(tx.desc);
     tx.cat = tx.isExpense ? categorize(tx.desc,cats) : categorizeInc(tx.desc);
+    const k = getTxKey(tx);
+    if(overrides[k]) tx.cat = overrides[k];
   });
   Object.values(chartInstances).forEach(c=>c.destroy()); chartInstances={};
 
-  // Only non-excluded
-  const activeTx = allTx.filter(tx => !tx.excluded);
-  const excludedCount = allTx.length - activeTx.length;
+  // Zeitraum + Ausschluss-Filter
+  const filterFrom = document.getElementById('filterFrom').value;
+  const filterTo   = document.getElementById('filterTo').value;
+  const inRange = tx => (!filterFrom || tx.monthKey >= filterFrom) && (!filterTo || tx.monthKey <= filterTo);
+  const activeTx = allTx.filter(tx => !tx.excluded && inRange(tx));
+  const excludedCount = allTx.filter(tx => tx.excluded && inRange(tx)).length;
 
   const months = {};
   activeTx.forEach(tx => { if(!months[tx.monthKey]) months[tx.monthKey]=[]; months[tx.monthKey].push(tx); });
   const sorted = Object.keys(months).sort();
 
+  const yearGroups = {};
+  sorted.forEach(mk => { const y = mk.split('-')[0]; if(!yearGroups[y]) yearGroups[y]=[]; yearGroups[y].push(mk); });
+  const sortedYears = Object.keys(yearGroups).sort();
+  const isMultiYear = sortedYears.length > 1;
+
   let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem">
-    <button style="background:var(--amber-light);color:var(--amber);border:1px solid rgba(186,117,23,0.3);border-radius:20px;padding:0.35rem 0.9rem;font-size:0.78rem;cursor:pointer;font-family:inherit" onclick="openFondsModal()">Mittelherkunft-Tracker</button>
+    <button style="background:var(--amber-light);color:var(--amber);border:1px solid rgba(186,117,23,0.3);border-radius:20px;padding:0.35rem 0.9rem;font-size:0.78rem;cursor:pointer;font-family:inherit" onclick="openFondsModal()">Budget-Töpfe</button>
   </div>`;
+
+  if(filterFrom || filterTo) {
+    const fmtM = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('de-DE',{month:'long',year:'numeric'}); };
+    const rangeLabel = [filterFrom && 'ab ' + fmtM(filterFrom), filterTo && 'bis ' + fmtM(filterTo)].filter(Boolean).join(' ');
+    html += `<div style="background:var(--accent-light);color:var(--accent);border-radius:8px;padding:0.5rem 1rem;font-size:0.8rem;margin-bottom:0.75rem;display:flex;align-items:center;gap:0.75rem">
+      <span>&#128197; Zeitraum: ${rangeLabel} &middot; ${sorted.length}&thinsp;Monat${sorted.length!==1?'e':''}</span>
+      <button onclick="resetZeitraum();runReport()" style="margin-left:auto;background:none;border:none;font-size:0.75rem;color:var(--accent);cursor:pointer;font-family:inherit;text-decoration:underline;padding:0">Zurücksetzen</button>
+    </div>`;
+  }
 
   if(excludedCount > 0) {
     html += `<div style="background:var(--amber-light);color:var(--amber);border-radius:8px;padding:0.5rem 1rem;font-size:0.8rem;margin-bottom:1rem">
@@ -717,89 +1335,116 @@ function runReport() {
   const totalInc = allInc.reduce((s,r)=>s+r.absAmt, 0);
 
   if(globalCats.length && sorted.length > 1) {
-    // Build month-by-cat matrix
     const catNames = globalCats.map(([c])=>c);
-    const catMonthTotals = {};
-    catNames.forEach(c=>{ catMonthTotals[c]={}; sorted.forEach(mk=>{ catMonthTotals[c][mk]=0; }); });
-    allExp.forEach(tx=>{ if(catMonthTotals[tx.cat]) catMonthTotals[tx.cat][tx.monthKey]=(catMonthTotals[tx.cat][tx.monthKey]||0)+tx.absAmt; });
 
-    const monthLabels = sorted.map(mk=>{ const[y,m]=mk.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('de-DE',{month:'short',year:'2-digit'}); });
+    // Spaltenschlüssel: Jahre wenn multi-year, sonst Monate
+    const tableKeys   = isMultiYear ? sortedYears : sorted;
+    const tableLabels = isMultiYear ? sortedYears
+      : sorted.map(mk=>{ const[y,m]=mk.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('de-DE',{month:'short',year:'2-digit'}); });
 
-    // Income per month
-    const monthInc  = sorted.map(mk=>allInc.filter(r=>r.monthKey===mk).reduce((s,r)=>s+r.absAmt,0));
-    const monthSums = sorted.map(mk=>allExp.filter(r=>r.monthKey===mk).reduce((s,r)=>s+r.absAmt,0));
+    const catColTotals = {};
+    catNames.forEach(c=>{ catColTotals[c]={}; tableKeys.forEach(k=>{ catColTotals[c][k]=0; }); });
+    allExp.forEach(tx=>{
+      const key = isMultiYear ? tx.monthKey.split('-')[0] : tx.monthKey;
+      if(catColTotals[tx.cat]) catColTotals[tx.cat][key]=(catColTotals[tx.cat][key]||0)+tx.absAmt;
+    });
+
+    const colSums={}, colInc={};
+    tableKeys.forEach(k=>{ colSums[k]=0; colInc[k]=0; });
+    allExp.forEach(tx=>{ const k=isMultiYear?tx.monthKey.split('-')[0]:tx.monthKey; if(colSums[k]!==undefined) colSums[k]+=tx.absAmt; });
+    allInc.forEach(tx=>{ const k=isMultiYear?tx.monthKey.split('-')[0]:tx.monthKey; if(colInc[k] !==undefined) colInc[k] +=tx.absAmt; });
+
+    const hasBudgets = cats.some(c => c.budget > 0);
+    const totalCatBudget = cats.filter(c=>c.budget>0).reduce((s,c)=>s+c.budget,0);
+    const avgLabel = isMultiYear ? 'Ø/Jahr' : 'Ø/Monat';
 
     html += `<div class="total-overview">
-      <h3>Gesamtübersicht nach Kategorien</h3>
-      <div style="display:grid;grid-template-columns:1fr 280px;gap:1.5rem;align-items:start;margin-bottom:1.5rem">
+      <h3>${isMultiYear?'Jahresübersicht nach Kategorien':'Gesamtübersicht nach Kategorien'}</h3>
+      <div style="display:grid;grid-template-columns:1fr 260px;gap:1.5rem;align-items:start;margin-bottom:1.5rem">
         <div style="position:relative;height:${Math.max(200,globalCats.length*28)}px">
           <canvas id="chart_total" role="img" aria-label="Gesamtausgaben nach Kategorien"></canvas></div>
-        <div style="position:relative;height:280px">
+        <div style="position:relative;height:260px">
           <canvas id="chart_total_pie" role="img" aria-label="Gesamtausgaben Tortendiagramm"></canvas></div>
       </div>
       <div style="overflow-x:auto">
       <table class="total-table">
-        <thead><tr><th>Kategorie</th>${monthLabels.map(l=>`<th>${l}</th>`).join('')}<th>Gesamt</th><th>Ø/Monat</th></tr></thead>
+        <thead><tr><th>Kategorie</th>${tableLabels.map(l=>`<th>${l}</th>`).join('')}<th>Gesamt</th><th>${avgLabel}</th>${hasBudgets?'<th>Budget/Mo.</th><th>Ø&thinsp;Δ</th>':''}</tr></thead>
         <tbody>`;
 
-    // Category rows (expenses)
     globalCats.forEach(([cat,total])=>{
-      const col = cats.find(c=>c.name===cat)?.color||'#888';
-      const monthVals = sorted.map(mk=>catMonthTotals[cat][mk]||0);
-      const avg = total/sorted.length;
+      const catObj = cats.find(c=>c.name===cat);
+      const col = catObj?.color||'#888';
+      const budget = catObj?.budget||0;
+      const colVals = tableKeys.map(k=>catColTotals[cat][k]||0);
+      const avg = total/tableKeys.length;
+      const monthAvg = total/sorted.length;
+      let budgetCells = '';
+      if(hasBudgets) {
+        if(budget > 0) {
+          const delta = monthAvg - budget;
+          const dCol = delta > 0 ? 'var(--danger)' : 'var(--success)';
+          budgetCells = `<td style="color:var(--muted)">${fmt(budget)}</td><td style="color:${dCol};font-weight:${Math.abs(delta)>budget*0.1?'500':'400'}">${delta>=0?'+':''}${fmt(delta)}</td>`;
+        } else {
+          budgetCells = `<td style="color:var(--border)">–</td><td style="color:var(--border)">–</td>`;
+        }
+      }
       html += `<tr>
         <td><div class="cat-cell"><span style="width:9px;height:9px;border-radius:2px;background:${col};flex-shrink:0"></span>${esc(cat)}</div></td>
-        ${monthVals.map(v=>`<td>${v>0?'<span style="color:var(--danger)">–'+fmt(v)+'</span>':'<span style="color:var(--border)">–</span>'}</td>`).join('')}
+        ${colVals.map(v=>`<td>${v>0?'<span style="color:var(--danger)">–'+fmt(v)+'</span>':'<span style="color:var(--border)">–</span>'}</td>`).join('')}
         <td class="highlight" style="color:var(--danger)">–${fmt(total)}</td>
-        <td style="color:var(--danger)">–${fmt(avg)}</td></tr>`;
+        <td style="color:var(--danger)">–${fmt(avg)}</td>${budgetCells}</tr>`;
     });
 
-    // Separator + Ausgaben-Summe
+    const avgTotalExp = grandTotal/sorted.length;
+    const totalDelta  = totalCatBudget > 0 ? avgTotalExp - totalCatBudget : null;
+    const totalBudgetCells = hasBudgets
+      ? (totalCatBudget > 0
+          ? `<td style="color:var(--muted);font-weight:500">${fmt(totalCatBudget)}</td><td style="color:${totalDelta>=0?'var(--danger)':'var(--success)'};font-weight:600">${totalDelta>=0?'+':''}${fmt(totalDelta)}</td>`
+          : '<td></td><td></td>')
+      : '';
     html += `<tr style="border-top:2px solid var(--border);font-weight:500">
       <td>&#931; Ausgaben</td>
-      ${monthSums.map(v=>`<td style="color:var(--danger)">–${fmt(v)}</td>`).join('')}
+      ${tableKeys.map(k=>`<td style="color:var(--danger)">–${fmt(colSums[k])}</td>`).join('')}
       <td style="color:var(--danger)">–${fmt(grandTotal)}</td>
-      <td style="color:var(--danger)">–${fmt(grandTotal/sorted.length)}</td></tr>`;
+      <td style="color:var(--danger)">–${fmt(grandTotal/tableKeys.length)}</td>${totalBudgetCells}</tr>`;
 
-    // Einnahmen-Zeile (nur wenn vorhanden)
     if(totalInc > 0) {
-      // Einnahmen nach Kategorien aufschlüsseln
       const incCatT={};
       allInc.forEach(r=>{ incCatT[r.cat]=(incCatT[r.cat]||0)+r.absAmt; });
       const incCatEntries = Object.entries(incCatT).sort((a,b)=>b[1]-a[1]);
-      const incCatMonth={};
-      incCatEntries.forEach(([c])=>{ incCatMonth[c]={}; sorted.forEach(mk=>{ incCatMonth[c][mk]=0; }); });
-      allInc.forEach(tx=>{ if(incCatMonth[tx.cat]) incCatMonth[tx.cat][tx.monthKey]=(incCatMonth[tx.cat][tx.monthKey]||0)+tx.absAmt; });
+      const incCatCol={};
+      incCatEntries.forEach(([c])=>{ incCatCol[c]={}; tableKeys.forEach(k=>{ incCatCol[c][k]=0; }); });
+      allInc.forEach(tx=>{
+        const key = isMultiYear ? tx.monthKey.split('-')[0] : tx.monthKey;
+        if(incCatCol[tx.cat]) incCatCol[tx.cat][key]=(incCatCol[tx.cat][key]||0)+tx.absAmt;
+      });
       const currentIncCats = getIncCats();
 
-      // Trennzeile
-      html += `<tr style="border-top:2px solid var(--border)"><td colspan="${sorted.length+3}" style="padding:0.5rem 0.75rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--success);font-weight:500">Einnahmen</td></tr>`;
+      html += `<tr style="border-top:2px solid var(--border)"><td colspan="${tableKeys.length+(hasBudgets?5:3)}" style="padding:0.5rem 0.75rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--success);font-weight:500">Einnahmen</td></tr>`;
 
       incCatEntries.forEach(([cat,total])=>{
         const col = currentIncCats.find(c=>c.name===cat)?.color||INC_COLORS[0];
-        const mVals = sorted.map(mk=>incCatMonth[cat][mk]||0);
+        const cVals = tableKeys.map(k=>incCatCol[cat][k]||0);
         html += `<tr>
           <td><div class="cat-cell"><span style="width:9px;height:9px;border-radius:2px;background:${col};flex-shrink:0"></span>${esc(cat)}</div></td>
-          ${mVals.map(v=>`<td>${v>0?'<span style="color:var(--success)">+'+fmt(v)+'</span>':'<span style="color:var(--border)">–</span>'}</td>`).join('')}
+          ${cVals.map(v=>`<td>${v>0?'<span style="color:var(--success)">+'+fmt(v)+'</span>':'<span style="color:var(--border)">–</span>'}</td>`).join('')}
           <td style="color:var(--success);font-weight:500">+${fmt(total)}</td>
-          <td style="color:var(--success)">+${fmt(total/sorted.length)}</td></tr>`;
+          <td style="color:var(--success)">+${fmt(total/tableKeys.length)}</td>${hasBudgets?'<td></td><td></td>':''}</tr>`;
       });
 
-      // Einnahmen-Summe
       html += `<tr style="font-weight:500">
         <td>&#931; Einnahmen</td>
-        ${monthInc.map(v=>`<td style="color:var(--success)">${v>0?'+'+fmt(v):'<span style="color:var(--border)">–</span>'}</td>`).join('')}
+        ${tableKeys.map(k=>`<td style="color:var(--success)">${colInc[k]>0?'+'+fmt(colInc[k]):'<span style="color:var(--border)">–</span>'}</td>`).join('')}
         <td style="color:var(--success)">+${fmt(totalInc)}</td>
-        <td style="color:var(--success)">+${fmt(totalInc/sorted.length)}</td></tr>`;
+        <td style="color:var(--success)">+${fmt(totalInc/tableKeys.length)}</td>${hasBudgets?'<td></td><td></td>':''}</tr>`;
 
-      // Saldo-Zeile
-      const monthSaldo = sorted.map((_,i) => monthInc[i] - monthSums[i]);
+      const saldoVals = tableKeys.map(k => (colInc[k]||0) - (colSums[k]||0));
       const totalSaldo = totalInc - grandTotal;
       html += `<tr style="border-top:1px solid var(--border);font-weight:600">
         <td>Saldo</td>
-        ${monthSaldo.map(v=>`<td style="color:${v>=0?'var(--success)':'var(--danger)'}">${v>=0?'+':''}${fmt(v)}</td>`).join('')}
+        ${saldoVals.map(v=>`<td style="color:${v>=0?'var(--success)':'var(--danger)'}">${v>=0?'+':''}${fmt(v)}</td>`).join('')}
         <td style="color:${totalSaldo>=0?'var(--success)':'var(--danger)'};font-weight:700">${totalSaldo>=0?'+':''}${fmt(totalSaldo)}</td>
-        <td style="color:${(totalSaldo/sorted.length)>=0?'var(--success)':'var(--danger)'}">${(totalSaldo/sorted.length)>=0?'+':''}${fmt(totalSaldo/sorted.length)}</td></tr>`;
+        <td style="color:${(totalSaldo/tableKeys.length)>=0?'var(--success)':'var(--danger)'}">${(totalSaldo/tableKeys.length)>=0?'+':''}${fmt(totalSaldo/tableKeys.length)}</td>${hasBudgets?'<td></td><td></td>':''}</tr>`;
     }
 
     html += `</tbody></table></div></div>`;
@@ -844,11 +1489,87 @@ function runReport() {
     html += `</div></div></div>`;
   }
 
-  // ── Monatliche Übersicht Chart ──
+  // ── Übersicht Chart ──
   const ovId = 'chart_overview';
-  html += `<div class="overview-card"><h3>Monatliche Ausgaben im Überblick</h3><div style="position:relative;height:220px"><canvas id="${ovId}" role="img" aria-label="Monatliche Ausgaben Überblick"></canvas></div></div>`;
+  const ovTitle = isMultiYear ? 'Jährliche Ausgaben im Überblick' : 'Monatliche Ausgaben im Überblick';
+  html += `<div class="overview-card"><h3>${ovTitle}</h3><div style="position:relative;height:220px"><canvas id="${ovId}" role="img" aria-label="${ovTitle}"></canvas></div></div>`;
 
-  sorted.forEach(mk => {
+  sorted.forEach((mk, idx) => {
+    const yrKey = mk.split('-')[0];
+    if (isMultiYear && (idx===0 || sorted[idx-1].split('-')[0]!==yrKey)) {
+      const yTx  = activeTx.filter(tx => tx.monthKey.startsWith(yrKey+'-'));
+      const yExp = yTx.filter(r=>r.isExpense).reduce((s,r)=>s+r.absAmt,0);
+      const yInc = yTx.filter(r=>r.isIncome ).reduce((s,r)=>s+r.absAmt,0);
+      const ySaldo = yInc - yExp;
+      const sCol = ySaldo >= 0 ? 'var(--success)' : 'var(--danger)';
+      html += `<div onclick="toggleYear('${yrKey}')" style="display:flex;align-items:center;gap:1rem;padding:0.75rem 1.25rem;background:var(--surface);border:1px solid var(--border);border-radius:10px;cursor:pointer;margin-bottom:1rem;user-select:none">
+        <span id="ytoggle_${yrKey}" style="color:var(--muted)">&#9660;</span>
+        <span style="font-family:Georgia,serif;font-size:1.2rem;font-weight:normal;flex:1">${yrKey}</span>
+        <span style="font-size:0.82rem;color:var(--muted)">${yearGroups[yrKey].length}&thinsp;Monat${yearGroups[yrKey].length!==1?'e':''}</span>
+        <span style="color:var(--danger)">–${fmt(yExp)}</span>
+        ${yInc>0?`<span style="color:var(--success)">+${fmt(yInc)}</span><span style="font-weight:500;color:${sCol};margin-left:0.25rem">${ySaldo>=0?'+':''}${fmt(ySaldo)}</span>`:''}
+      </div><div id="yearblocks_${yrKey}">`;
+      // Monatstabelle für dieses Jahr
+      const yrMks  = yearGroups[yrKey];
+      const yrMkLbls = yrMks.map(m=>{ const[,mo]=m.split('-'); return new Date(2000,+mo-1,1).toLocaleDateString('de-DE',{month:'short'}); });
+      const yrCatT = {};
+      activeTx.filter(tx=>tx.isExpense&&tx.monthKey.startsWith(yrKey+'-')).forEach(tx=>{ yrCatT[tx.cat]=(yrCatT[tx.cat]||0)+tx.absAmt; });
+      const yrCats = Object.entries(yrCatT).sort((a,b)=>b[1]-a[1]);
+      if(yrCats.length) {
+        const yrColT={}, yrColInc={};
+        yrMks.forEach(m=>{ yrColT[m]=0; yrColInc[m]=0; });
+        activeTx.filter(tx=>tx.monthKey.startsWith(yrKey+'-')).forEach(tx=>{
+          if(tx.isExpense) yrColT[tx.monthKey]=(yrColT[tx.monthKey]||0)+tx.absAmt;
+          else             yrColInc[tx.monthKey]=(yrColInc[tx.monthKey]||0)+tx.absAmt;
+        });
+        html += `<div style="overflow-x:auto;margin-bottom:1.25rem"><table class="total-table">
+          <thead><tr><th>Kategorie</th>${yrMkLbls.map(l=>`<th>${l}</th>`).join('')}<th>Gesamt</th><th>Ø/Mo.</th></tr></thead><tbody>`;
+        yrCats.forEach(([cat,total])=>{
+          const catObj=cats.find(c=>c.name===cat);
+          const col=catObj?.color||'#888';
+          html += `<tr><td><div class="cat-cell"><span style="width:9px;height:9px;border-radius:2px;background:${col};flex-shrink:0"></span>${esc(cat)}</div></td>
+            ${yrMks.map(m=>{ const v=(activeTx.filter(tx=>tx.isExpense&&tx.monthKey===m&&tx.cat===cat).reduce((s,r)=>s+r.absAmt,0)); return `<td>${v>0?'<span style="color:var(--danger)">–'+fmt(v)+'</span>':'<span style="color:var(--border)">–</span>'}</td>`; }).join('')}
+            <td class="highlight" style="color:var(--danger)">–${fmt(total)}</td>
+            <td style="color:var(--danger)">–${fmt(total/yrMks.length)}</td></tr>`;
+        });
+        const yrTotals = yrMks.map(m=>yrColT[m]||0);
+        const yrGrand  = yrTotals.reduce((s,v)=>s+v,0);
+        html += `<tr style="border-top:2px solid var(--border);font-weight:500"><td>&#931; Ausgaben</td>
+          ${yrTotals.map(v=>`<td style="color:var(--danger)">–${fmt(v)}</td>`).join('')}
+          <td style="color:var(--danger)">–${fmt(yrGrand)}</td>
+          <td style="color:var(--danger)">–${fmt(yrGrand/yrMks.length)}</td></tr>`;
+        const yrIncTotal = yrMks.reduce((s,m)=>s+(yrColInc[m]||0),0);
+        if(yrIncTotal>0) {
+          const yrIncCatT={};
+          activeTx.filter(tx=>tx.isIncome&&tx.monthKey.startsWith(yrKey+'-')).forEach(tx=>{ yrIncCatT[tx.cat]=(yrIncCatT[tx.cat]||0)+tx.absAmt; });
+          const yrIncCatEntries = Object.entries(yrIncCatT).sort((a,b)=>b[1]-a[1]);
+          const yrIncCatCol={};
+          yrIncCatEntries.forEach(([c])=>{ yrIncCatCol[c]={}; yrMks.forEach(m=>{ yrIncCatCol[c][m]=0; }); });
+          activeTx.filter(tx=>tx.isIncome&&tx.monthKey.startsWith(yrKey+'-')).forEach(tx=>{
+            if(yrIncCatCol[tx.cat]) yrIncCatCol[tx.cat][tx.monthKey]=(yrIncCatCol[tx.cat][tx.monthKey]||0)+tx.absAmt;
+          });
+          const currentIncCats = getIncCats();
+          html += `<tr style="border-top:2px solid var(--border)"><td colspan="${yrMks.length+3}" style="padding:0.5rem 0.75rem;font-size:0.75rem;text-transform:uppercase;letter-spacing:.07em;color:var(--success);font-weight:500">Einnahmen</td></tr>`;
+          yrIncCatEntries.forEach(([cat,total])=>{
+            const col=currentIncCats.find(c=>c.name===cat)?.color||INC_COLORS[0];
+            html += `<tr><td><div class="cat-cell"><span style="width:9px;height:9px;border-radius:2px;background:${col};flex-shrink:0"></span>${esc(cat)}</div></td>
+              ${yrMks.map(m=>{ const v=yrIncCatCol[cat][m]||0; return `<td>${v>0?'<span style="color:var(--success)">+'+fmt(v)+'</span>':'<span style="color:var(--border)">–</span>'}</td>`; }).join('')}
+              <td style="color:var(--success);font-weight:500">+${fmt(total)}</td>
+              <td style="color:var(--success)">+${fmt(total/yrMks.length)}</td></tr>`;
+          });
+          html += `<tr style="font-weight:500"><td>&#931; Einnahmen</td>
+            ${yrMks.map(m=>`<td style="color:var(--success)">${yrColInc[m]>0?'+'+fmt(yrColInc[m]):'<span style="color:var(--border)">–</span>'}</td>`).join('')}
+            <td style="color:var(--success)">+${fmt(yrIncTotal)}</td>
+            <td style="color:var(--success)">+${fmt(yrIncTotal/yrMks.length)}</td></tr>`;
+          const yrSaldo = yrIncTotal - yrGrand;
+          html += `<tr style="border-top:1px solid var(--border);font-weight:600"><td>Saldo</td>
+            ${yrMks.map(m=>{ const v=(yrColInc[m]||0)-(yrColT[m]||0); return `<td style="color:${v>=0?'var(--success)':'var(--danger)'}">${v>=0?'+':''}${fmt(v)}</td>`; }).join('')}
+            <td style="color:${yrSaldo>=0?'var(--success)':'var(--danger)'};font-weight:700">${yrSaldo>=0?'+':''}${fmt(yrSaldo)}</td>
+            <td style="color:${(yrSaldo/yrMks.length)>=0?'var(--success)':'var(--danger)'}">${(yrSaldo/yrMks.length)>=0?'+':''}${fmt(yrSaldo/yrMks.length)}</td></tr>`;
+        }
+        html += `</tbody></table></div>`;
+      }
+    }
     const rows = months[mk];
     const exp  = rows.filter(r=>r.isExpense);
     const inc  = rows.filter(r=>r.isIncome);
@@ -859,8 +1580,17 @@ function runReport() {
     const maxC = sortedCats[0]?.[1]||1;
     const [yr,mn] = mk.split('-');
     const label = new Date(+yr,+mn-1,1).toLocaleDateString('de-DE',{month:'long',year:'numeric'});
+    const mkSafe = mk.replace('-','_');
 
-    html += `<div class="month-block"><div class="month-title">${label}</div>
+    html += `<div class="month-block">
+      <div class="month-title" onclick="toggleMonth('${mkSafe}')" style="cursor:pointer;display:flex;align-items:center;gap:0.75rem">
+        <span id="mtoggle_${mkSafe}" style="font-size:0.85rem;color:var(--muted)">&#9654;</span>
+        <span style="flex:1">${label}</span>
+        <span style="font-size:0.85rem;color:var(--danger)">–${fmt(totExp)}</span>
+        ${totInc>0?`<span style="font-size:0.85rem;color:var(--success)">+${fmt(totInc)}</span>`:''}
+        <span style="font-size:0.8rem;color:var(--muted)">${exp.length}&thinsp;Buchung${exp.length!==1?'en':''}</span>
+      </div>
+      <div id="monthbody_${mkSafe}" style="display:none">
       <div class="summary-cards">
         <div class="stat-card exp"><div class="lbl">Ausgaben</div><div class="val">&ndash;${fmt(totExp)}</div></div>
         ${totInc>0?`<div class="stat-card inc"><div class="lbl">Einnahmen</div><div class="val">+${fmt(totInc)}</div></div>`:''}
@@ -868,19 +1598,27 @@ function runReport() {
         <div class="stat-card"><div class="lbl">Buchungen</div><div class="val">${exp.length}</div></div>
       </div>`;
 
-    if(sortedCats.length) {
-      html += `<div style="display:grid;grid-template-columns:1fr 180px;gap:1rem;align-items:center">
+    if(sortedCats.length && totInc === 0) {
+      html += `<div style="display:grid;grid-template-columns:1fr 160px;gap:1rem;align-items:center">
         <div class="cat-bars">`;
       sortedCats.forEach(([cat,amt]) => {
         const pct = (amt/maxC*100).toFixed(1);
-        const col = cats.find(c=>c.name===cat)?.color||'#888';
+        const catObj = cats.find(c=>c.name===cat);
+        const col = catObj?.color||'#888';
+        const budget = catObj?.budget||0;
+        let budgetBadge = '';
+        if(budget > 0) {
+          const bPct = Math.round(amt/budget*100);
+          const over = amt > budget;
+          budgetBadge = `<span style="font-size:0.68rem;padding:1px 6px;border-radius:8px;white-space:nowrap;background:${over?'var(--danger-light)':'var(--success-light)'};color:${over?'var(--danger)':'var(--success)'}">${over?'▲ ':''}${bPct} %</span>`;
+        }
         html += `<div class="bar-row">
           <span class="cat-name" title="${esc(cat)}">${esc(cat)}</span>
           <div class="bar-wrap"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>
-          <span class="amount">${fmt(amt)}</span></div>`;
+          <span class="amount">${fmt(amt)}</span>${budgetBadge}</div>`;
       });
       html += `</div>
-        <div style="position:relative;height:180px">
+        <div style="position:relative;height:160px">
           <canvas id="chart_pie_${mk.replace('-','_')}" role="img" aria-label="Ausgaben ${label}"></canvas>
         </div>
       </div>`;
@@ -890,16 +1628,25 @@ function runReport() {
       const overM    = totExp > totInc;
       const expPctM  = Math.min(totExp / totInc * 100, 100);
       const remPctM  = Math.max(100 - totExp / totInc * 100, 0);
-      html += `<div class="cat-bars" style="margin-top:0.75rem">
+      html += `<div style="display:grid;grid-template-columns:1fr 160px;gap:1rem;align-items:center">
+        <div class="cat-bars">
         <div style="font-size:0.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:0.5rem">Einkommensquote &middot; Basis ${fmt(totInc)}</div>
         <div style="display:grid;grid-template-columns:120px 1fr 56px 88px;gap:0.35rem 0.6rem;align-items:center;font-size:0.8rem">`;
       sortedCats.forEach(([cat, amt]) => {
-        const col = cats.find(c=>c.name===cat)?.color||'#888';
+        const catObj = cats.find(c=>c.name===cat);
+        const col = catObj?.color||'#888';
         const pct = amt / totInc * 100;
+        const budget = catObj?.budget||0;
+        let budgetBadge = '';
+        if(budget > 0) {
+          const bPct = Math.round(amt/budget*100);
+          const over = amt > budget;
+          budgetBadge = `<span style="font-size:0.68rem;padding:1px 6px;border-radius:8px;white-space:nowrap;background:${over?'var(--danger-light)':'var(--success-light)'};color:${over?'var(--danger)':'var(--success)'}">${over?'▲ ':''}${bPct} %</span>`;
+        }
         html += `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(cat)}">${esc(cat)}</span>
           <div class="bar-wrap"><div class="bar-fill" style="width:${Math.min(pct,100).toFixed(1)}%;background:${col}"></div></div>
           <span style="text-align:right;color:var(--muted)">${pct.toFixed(1)}&thinsp;%</span>
-          <span style="text-align:right;color:var(--danger)">–${fmt(amt)}</span>`;
+          <span style="display:flex;align-items:center;justify-content:flex-end;gap:0.35rem;color:var(--danger)">–${fmt(amt)}${budgetBadge}</span>`;
       });
       html += `<div style="grid-column:1/-1;border-top:1px solid var(--border);margin:0.1rem 0"></div>
         <span style="font-weight:500">Σ Ausgaben</span>
@@ -910,10 +1657,13 @@ function runReport() {
         <div class="bar-wrap" style="height:9px"><div class="bar-fill" style="width:${remPctM.toFixed(1)}%;background:${overM?'var(--danger)':'var(--success)'}"></div></div>
         <span style="text-align:right;font-weight:600;color:${overM?'var(--danger)':'var(--success)'}">${remPctM.toFixed(1)}&thinsp;%</span>
         <span style="text-align:right;font-weight:600;color:${overM?'var(--danger)':'var(--success)'}">${overM?'–':'+'}${fmt(Math.abs(totInc-totExp))}</span>`;
-      html += `</div></div>`;
+      html += `</div></div>
+        <div style="position:relative;height:160px">
+          <canvas id="chart_pie_${mk.replace('-','_')}" role="img" aria-label="Ausgaben ${label}"></canvas>
+        </div>
+      </div>`;
     }
 
-    const mkSafe = mk.replace('-','_');
     const expSorted = exp.slice().sort((a,b)=>b.date-a.date);
     // Build chip list: "Alle" + one per category present this month
     const catsThisMonth = [...new Set(expSorted.map(t=>t.cat))].sort((a,b)=>{
@@ -940,11 +1690,12 @@ function runReport() {
       const txk = getTxKey(tx);
       const ff = activeFonds.find(fd => (fd.expenseKeys||[]).includes(txk));
       const fondsBadge = ff ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:8px;background:var(--amber-light);color:var(--amber);margin-left:3px;white-space:nowrap">${esc(ff.name)}</span>` : '';
+      const isOvr = !!overrides[txk];
       html += `<tr data-cat="${esc(tx.cat)}">
         <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
         <td style="font-weight:500">${esc(tx.payee||tx.desc.substring(0,40))}</td>
         <td style="color:var(--muted)">${esc(purposeShort)}</td>
-        <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span>${fondsBadge}</td>
+        <td><span class="badge" data-txkey="${esc(txk)}" data-isexp="1" data-curcat="${esc(tx.cat)}" style="background:${col}22;color:${col};cursor:pointer${isOvr?';outline:1px dashed '+col+';outline-offset:1px':''}" title="${isOvr?'Manuell kategorisiert – klicken zum Ändern':'Klicken zum Umkategorisieren'}" onclick="showCatPopup(this)">${esc(tx.cat)}${isOvr?' <span style="font-size:0.65em">✎</span>':''}</span>${fondsBadge}</td>
         <td style="color:var(--muted);font-size:0.75rem">${esc(tx.bank)}</td>
         <td>&ndash;${fmt(tx.absAmt)}</td></tr>`;
     });
@@ -980,18 +1731,20 @@ function runReport() {
         const txk = getTxKey(tx);
         const ff = activeFonds.find(fd => (fd.incomeKeys||[]).includes(txk));
         const fondsBadge = ff ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:8px;background:var(--amber-light);color:var(--amber);margin-left:3px;white-space:nowrap">${esc(ff.name)}</span>` : '';
+        const isOvr = !!overrides[txk];
         html+=`<tr data-cat="${esc(tx.cat)}">
           <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
           <td style="font-weight:500">${esc(tx.payee||tx.desc.substring(0,40))}</td>
           <td style="color:var(--muted)">${esc(ps)}</td>
-          <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span>${fondsBadge}</td>
+          <td><span class="badge" data-txkey="${esc(txk)}" data-isexp="0" data-curcat="${esc(tx.cat)}" style="background:${col}22;color:${col};cursor:pointer${isOvr?';outline:1px dashed '+col+';outline-offset:1px':''}" title="${isOvr?'Manuell kategorisiert – klicken zum Ändern':'Klicken zum Umkategorisieren'}" onclick="showCatPopup(this)">${esc(tx.cat)}${isOvr?' <span style="font-size:0.65em">✎</span>':''}</span>${fondsBadge}</td>
           <td style="color:var(--muted);font-size:0.75rem">${esc(tx.bank)}</td>
           <td style="color:var(--success)">+${fmt(tx.absAmt)}</td></tr>`;
       });
       html+=`</tbody></table></div></div>`;
     }
 
-    html += `</div>`;
+    html += `</div></div>`; // monthbody + month-block
+    if (isMultiYear && (idx===sorted.length-1 || sorted[idx+1].split('-')[0]!==yrKey)) html += `</div>`; // year-section
   });
 
   html += `<div style="margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;align-items:center;gap:1rem">
@@ -1043,21 +1796,6 @@ function runReport() {
         makePie(globalCats, ([cat])=>cats.find(c=>c.name===cat)?.color||'#888'));
     }
 
-    // Monatliche Balken-Übersicht
-    const ovCtx = document.getElementById(ovId);
-    if(ovCtx) {
-      const lbls = sorted.map(mk=>{ const[y,m]=mk.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('de-DE',{month:'short',year:'2-digit'}); });
-      chartInstances[ovId] = new Chart(ovCtx,{
-        type:'bar', data:{ labels:lbls, datasets:[
-          { label:'Ausgaben', data:sorted.map(mk=>months[mk].filter(r=>r.isExpense).reduce((s,r)=>s+r.absAmt,0)), backgroundColor:'#185fa5bb', borderRadius:4 },
-          { label:'Einnahmen', data:sorted.map(mk=>months[mk].filter(r=>r.isIncome).reduce((s,r)=>s+r.absAmt,0)), backgroundColor:'#0f6e5688', borderRadius:4 },
-        ]},
-        options:{ responsive:true,maintainAspectRatio:false,
-          plugins:{ legend:{ display:false } },
-          scales:{ y:{ ticks:{ callback:v=>fmt(v) } }, x:{ ticks:{ autoSkip:false,maxRotation:45 } } } }
-      });
-    }
-
     // Monatliche Tortendiagramme
     sorted.forEach(mk => {
       const pieCtx = document.getElementById('chart_pie_'+mk.replace('-','_'));
@@ -1070,6 +1808,26 @@ function runReport() {
       chartInstances['chart_pie_'+mk.replace('-','_')] = new Chart(pieCtx,
         makePie(catEntries, ([cat])=>cats.find(c=>c.name===cat)?.color||'#888'));
     });
+
+    // Jahres- oder Monats-Übersicht
+    const ovCtx = document.getElementById(ovId);
+    if(ovCtx) {
+      const ovKeys   = isMultiYear ? sortedYears : sorted;
+      const ovLabels = isMultiYear ? sortedYears
+        : sorted.map(mk=>{ const[y,m]=mk.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('de-DE',{month:'short',year:'2-digit'}); });
+      const ovExp = ovKeys.map(k => activeTx.filter(tx=>tx.isExpense&&(isMultiYear?tx.monthKey.startsWith(k+'-'):tx.monthKey===k)).reduce((s,r)=>s+r.absAmt,0));
+      const ovInc = ovKeys.map(k => activeTx.filter(tx=>tx.isIncome&&(isMultiYear?tx.monthKey.startsWith(k+'-'):tx.monthKey===k)).reduce((s,r)=>s+r.absAmt,0));
+      chartInstances[ovId] = new Chart(ovCtx,{
+        type:'bar', data:{ labels:ovLabels, datasets:[
+          { label:'Ausgaben',  data:ovExp, backgroundColor:'#185fa5bb', borderRadius:4 },
+          { label:'Einnahmen', data:ovInc, backgroundColor:'#0f6e5688', borderRadius:4 },
+        ]},
+        options:{ responsive:true,maintainAspectRatio:false,
+          plugins:{ legend:{ display:false } },
+          scales:{ y:{ ticks:{ callback:v=>fmt(v) } }, x:{ ticks:{ autoSkip:false,maxRotation:45 } } } }
+      });
+    }
+
   }, 60);
 }
 
@@ -1161,34 +1919,55 @@ function filterInc(mkSafe, cat, chipEl) {
   }
 }
 
-// ── Mittelherkunft (Topf-Tracking) ───────────────────────
+// ── Budget-Töpfe (Topf-Tracking) ───────────────────────
 function getTxKey(tx) {
   const d = tx.date;
   const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
   return iso+'|'+tx.amount.toFixed(2)+'|'+(tx.payee||'')+'|'+(tx.purpose||'');
 }
 function loadFonds() {
-  try { const s = localStorage.getItem('mittelfonds_v1'); if(s) return JSON.parse(s); } catch(e){}
+  const normalise = fonds => {
+    fonds.forEach(f => {
+      f.mode = f.mode === 'manual' ? 'manual' : 'income';
+      if(typeof f.budget !== 'number' || isNaN(f.budget)) f.budget = 0;
+    });
+    return fonds;
+  };
+  const fromDb = dbGetSetting('fonds');
+  if (fromDb) return normalise(fromDb);
+  try {
+    const s = localStorage.getItem('mittelfonds_v1');
+    if(s) return normalise(JSON.parse(s));
+  } catch(e){}
   return [];
 }
 function saveFonds(fonds) {
-  try { localStorage.setItem('mittelfonds_v1', JSON.stringify(fonds)); } catch(e){}
+  if (sqlDb) dbSetSetting('fonds', fonds);
+  else try { localStorage.setItem('mittelfonds_v1', JSON.stringify(fonds)); } catch(e){}
 }
 function openFondsModal() {
-  renderFondsModal();
   document.getElementById('fondsModal').style.display = 'block';
+  renderFondsModal();
 }
 function closeFondsModal() {
   document.getElementById('fondsModal').style.display = 'none';
+}
+function toggleFondsBudgetInp() {
+  const mode = document.getElementById('fondsModeInp').value;
+  document.getElementById('fondsBudgetInp').style.display = mode === 'manual' ? '' : 'none';
 }
 function createFonds() {
   const inp = document.getElementById('fondsNameInp');
   const name = inp.value.trim();
   if(!name) { inp.focus(); return; }
+  const mode = document.getElementById('fondsModeInp').value === 'manual' ? 'manual' : 'income';
+  const budgetInp = document.getElementById('fondsBudgetInp');
+  const budget = mode === 'manual' ? (parseFloat(budgetInp.value) || 0) : 0;
   const fonds = loadFonds();
-  fonds.push({ id: 'f'+Date.now(), name, incomeKeys: [], expenseKeys: [] });
+  fonds.push({ id: 'f'+Date.now(), name, mode, budget, incomeKeys: [], expenseKeys: [] });
   saveFonds(fonds);
   inp.value = '';
+  budgetInp.value = '';
   renderFondsModal();
   document.getElementById('fondsNameInp').focus();
 }
@@ -1201,6 +1980,20 @@ function renameFonds(id, name) {
   const fonds = loadFonds();
   const f = fonds.find(f => f.id === id);
   if(f && name.trim()) { f.name = name.trim(); saveFonds(fonds); }
+}
+function setFondsMode(id, mode) {
+  const fonds = loadFonds();
+  const f = fonds.find(f => f.id === id);
+  if(f) f.mode = mode === 'manual' ? 'manual' : 'income';
+  saveFonds(fonds);
+  renderFondsModal();
+}
+function setFondsBudget(id, value) {
+  const fonds = loadFonds();
+  const f = fonds.find(f => f.id === id);
+  if(f) f.budget = parseFloat(value) || 0;
+  saveFonds(fonds);
+  renderFondsModal();
 }
 function assignTxToFonds(key, fondsId, isInc) {
   const body = document.getElementById('fondsModalBody');
@@ -1215,7 +2008,7 @@ function assignTxToFonds(key, fondsId, isInc) {
   });
   if(fondsId) {
     const f = fonds.find(f => f.id === fondsId);
-    if(f) (isInc ? f.incomeKeys : f.expenseKeys).push(key);
+    if(f && !(isInc && f.mode === 'manual')) (isInc ? f.incomeKeys : f.expenseKeys).push(key);
   }
   saveFonds(fonds);
 
@@ -1253,38 +2046,74 @@ function renderFondsModal() {
     (f.expenseKeys || []).forEach(k => keyToFonds[k] = f.id);
   });
 
-  let html = `<div style="display:flex;gap:0.75rem;margin-bottom:1.5rem;align-items:center">
-    <input id="fondsNameInp" type="text" placeholder='Topf-Name, z.B. "Erbschaft Oma"'
-      style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.75rem;font-size:0.85rem;color:var(--text);font-family:inherit"
+  let html = `<div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;align-items:center;flex-wrap:wrap">
+    <input id="fondsNameInp" type="text" placeholder='Topf-Name, z.B. "Urlaub"'
+      style="flex:1;min-width:160px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.75rem;font-size:0.85rem;color:var(--text);font-family:inherit"
+      onkeydown="if(event.key==='Enter')createFonds()">
+    <select id="fondsModeInp" onchange="toggleFondsBudgetInp()"
+      style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.6rem;font-size:0.82rem;color:var(--text);font-family:inherit">
+      <option value="income">Einnahmen als Basis</option>
+      <option value="manual">Manuelles Budget</option>
+    </select>
+    <input id="fondsBudgetInp" type="number" step="0.01" placeholder="Budget €" style="display:none;width:110px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0.5rem 0.6rem;font-size:0.85rem;color:var(--text);font-family:inherit"
       onkeydown="if(event.key==='Enter')createFonds()">
     <button onclick="createFonds()" class="add-btn" style="margin:0;padding:0.5rem 1rem;white-space:nowrap">+ Neuer Topf</button>
   </div>`;
 
+  const fondsChartData = [];
+
   if(!fonds.length) {
-    html += `<p style="color:var(--muted);font-size:0.85rem;text-align:center;padding:1.5rem 0">Noch keine Töpfe angelegt. Lege einen Topf an und weise Einnahmen &amp; Ausgaben zu.</p>`;
+    html += `<p style="color:var(--muted);font-size:0.85rem;text-align:center;padding:1.5rem 0">Noch keine Töpfe angelegt. Lege einen Topf an: entweder mit Einnahmen als Basis oder mit einem manuellen Budget &ndash; und weise Ausgaben zu.</p>`;
   } else {
+    if(fonds.length >= 2) {
+      html += `<div class="fonds-card">
+        <h3 style="font-size:0.78rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin-bottom:0.75rem">Budget vs. Ausgaben im Überblick</h3>
+        <div style="position:relative;height:${Math.max(140, fonds.length*46)}px">
+          <canvas id="fondsOverviewChart" role="img" aria-label="Budget vs. Ausgaben aller Töpfe"></canvas>
+        </div>
+      </div>`;
+    }
     fonds.forEach(f => {
+      const mode   = f.mode === 'manual' ? 'manual' : 'income';
       const incF   = incTxs.filter(tx => (f.incomeKeys  || []).includes(getTxKey(tx)));
       const expF   = expTxs.filter(tx => (f.expenseKeys || []).includes(getTxKey(tx)));
       const totInc = incF.reduce((s,t) => s + t.absAmt, 0);
       const totExp = expF.reduce((s,t) => s + t.absAmt, 0);
-      const saldo  = totInc - totExp;
+      const budget = mode === 'manual' ? (f.budget || 0) : totInc;
+      const saldo  = budget - totExp;
       const sCol   = saldo >= 0 ? 'var(--success)' : 'var(--danger)';
+      const pct    = budget > 0 ? Math.min(100, (totExp / budget) * 100) : (totExp > 0 ? 100 : 0);
+      const barCol = (budget > 0 && totExp > budget) ? 'var(--danger)' : (pct >= 80 ? 'var(--amber)' : 'var(--success)');
+      fondsChartData.push({ id: f.id, name: f.name, budget, totExp, saldo });
       html += `<div class="fonds-card">
         <div class="fonds-card-hdr">
           <input type="text" value="${esc(f.name)}"
             onblur="renameFonds('${esc(f.id)}',this.value)"
             onkeydown="if(event.key==='Enter')this.blur()">
+          <select class="fonds-select" style="max-width:150px" onchange="setFondsMode('${esc(f.id)}',this.value)">
+            <option value="income"${mode==='income'?' selected':''}>Einnahmen-Basis</option>
+            <option value="manual"${mode==='manual'?' selected':''}>Manuelles Budget</option>
+          </select>
           <button class="del-btn" onclick="deleteFonds('${esc(f.id)}')">&#215;</button>
         </div>
-        <div class="fonds-stats">
-          <div class="fonds-stat"><div class="lbl">Einnahmen</div>
-            <div class="val" style="color:var(--success)">+${fmt(totInc)}</div></div>
-          <div class="fonds-stat"><div class="lbl">Ausgaben</div>
-            <div class="val" style="color:var(--danger)">${totExp>0?'–'+fmt(totExp):'–'}</div></div>
-          <div class="fonds-stat"><div class="lbl">Verbleibend</div>
-            <div class="val" style="color:${sCol}">${saldo>=0?'+':''}${fmt(saldo)}</div></div>
-        </div>`;
+        <div style="display:flex;align-items:center;gap:1rem;margin-top:0.6rem">
+          <div class="fonds-stats" style="flex:1;margin-top:0">
+            <div class="fonds-stat"><div class="lbl">${mode==='manual'?'Budget':'Einnahmen'}</div>
+              ${mode==='manual'
+                ? `<input type="number" step="0.01" class="fonds-budget-inp" value="${budget.toFixed(2)}"
+                    onblur="setFondsBudget('${esc(f.id)}',this.value)" onkeydown="if(event.key==='Enter')this.blur()">`
+                : `<div class="val" style="color:var(--success)">+${fmt(totInc)}</div>`}
+            </div>
+            <div class="fonds-stat"><div class="lbl">Ausgaben</div>
+              <div class="val" style="color:var(--danger)">${totExp>0?'–'+fmt(totExp):'–'}</div></div>
+            <div class="fonds-stat"><div class="lbl">Verbleibend</div>
+              <div class="val" style="color:${sCol}">${saldo>=0?'+':''}${fmt(saldo)}</div></div>
+          </div>
+          ${(budget>0||totExp>0) ? `<div style="position:relative;width:80px;height:80px;flex-shrink:0">
+            <canvas id="fondsDonut_${esc(f.id)}" role="img" aria-label="Restbudget ${esc(f.name)}"></canvas>
+          </div>` : ''}
+        </div>
+        <div class="fonds-budget-bar"><div style="width:${pct}%;background:${barCol}"></div></div>`;
       if(incF.length || expF.length) {
         const allF = [...incF, ...expF].sort((a,b) => b.date - a.date);
         html += `<details style="margin-top:0.75rem"><summary style="font-size:0.78rem;color:var(--muted);cursor:pointer;user-select:none">
@@ -1326,7 +2155,8 @@ function renderFondsModal() {
       const key  = getTxKey(tx);
       const aFId = keyToFonds[key] || '';
       const iI   = tx.isIncome;
-      const opts = fonds.map(f => `<option value="${esc(f.id)}"${f.id===aFId?' selected':''}>${esc(f.name)}</option>`).join('');
+      const elig = iI ? fonds.filter(f => f.mode !== 'manual') : fonds;
+      const opts = elig.map(f => `<option value="${esc(f.id)}"${f.id===aFId?' selected':''}>${esc(f.name)}</option>`).join('');
       const ps   = (tx.purpose||'').substring(0,60);
       html += `<tr data-type="${iI?'inc':'exp'}" data-assigned="${aFId?'yes':'no'}"
         data-search="${esc(((tx.payee||'')+' '+(tx.purpose||'')).toLowerCase())}">
@@ -1351,12 +2181,240 @@ function renderFondsModal() {
   }
 
   body.innerHTML = html;
+  renderFondsCharts(fondsChartData);
+}
+
+function renderFondsCharts(fondsChartData) {
+  Object.values(fondsChartInstances).forEach(c => c.destroy());
+  fondsChartInstances = {};
+  if(!fondsChartData.length) return;
+
+  const isDark    = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const surfaceCl = isDark ? '#262624' : '#ffffff';
+  const successCl = isDark ? '#5dcaa5' : '#0f6e56';
+  const dangerCl  = isDark ? '#f0997b' : '#993c1d';
+  const amberCl   = isDark ? '#ef9f27' : '#ba7517';
+  const accentCl  = isDark ? '#85b7eb' : '#185fa5';
+  const mutedCl   = isDark ? '#9b9b94' : '#6b6b66';
+
+  fondsChartData.forEach(d => {
+    const canvas = document.getElementById('fondsDonut_'+d.id);
+    if(!canvas) return;
+    const spent     = Math.max(d.budget, 0) > 0 ? Math.min(d.totExp, d.budget) : 0;
+    const remaining = Math.max(d.budget - d.totExp, 0);
+    const over      = Math.max(d.totExp - Math.max(d.budget, 0), 0);
+    const segs = [
+      { label: 'Verbraucht',  value: spent,     color: amberCl },
+      { label: 'Verbleibend', value: remaining, color: successCl },
+      { label: 'Überzogen',   value: over,      color: dangerCl },
+    ].filter(s => s.value > 0);
+    if(!segs.length) return;
+    fondsChartInstances['fondsDonut_'+d.id] = new Chart(canvas, {
+      type: 'doughnut',
+      data: { labels: segs.map(s=>s.label), datasets: [{
+        data: segs.map(s=>s.value), backgroundColor: segs.map(s=>s.color),
+        borderWidth: 2, borderColor: surfaceCl,
+      }]},
+      options: { responsive:true, maintainAspectRatio:false, cutout:'68%',
+        plugins: { legend:{ display:false },
+          tooltip:{ callbacks:{ label: ctx => ` ${ctx.label}: ${fmt(ctx.parsed)}` } } }
+      }
+    });
+  });
+
+  const ovCtx = document.getElementById('fondsOverviewChart');
+  if(ovCtx) {
+    fondsChartInstances['fondsOverviewChart'] = new Chart(ovCtx, {
+      type: 'bar',
+      data: { labels: fondsChartData.map(d=>d.name), datasets: [
+        { label:'Budget',     data: fondsChartData.map(d=>d.budget), backgroundColor: accentCl+'bb', borderRadius:4 },
+        { label:'Ausgegeben', data: fondsChartData.map(d=>d.totExp), backgroundColor: dangerCl+'bb', borderRadius:4 },
+      ]},
+      options: { indexAxis:'y', responsive:true, maintainAspectRatio:false,
+        plugins: { legend:{ display:true, position:'top', labels:{ boxWidth:12, font:{ size:11 }, color:mutedCl } } },
+        scales: { x:{ ticks:{ callback:v=>fmt(v) } }, y:{ ticks:{ font:{ size:11 } } } } }
+    });
+  }
+}
+
+function showCatPopup(badgeEl) {
+  document.querySelectorAll('.cat-popup').forEach(p => p.remove());
+  const txKey = badgeEl.dataset.txkey;
+  const isExp = badgeEl.dataset.isexp === '1';
+  const catList = isExp ? getCats().filter(c=>c.name) : getIncCats().filter(c=>c.name);
+  const current = badgeEl.dataset.curcat || '';
+  const tx = allTx.find(t => getTxKey(t) === txKey);
+  const suggestedKw = (tx?.payee || tx?.purpose || '').toLowerCase().split(/\s+/)[0].replace(/[^a-z0-9äöüß]/gi,'').trim();
+
+  const popup = document.createElement('div');
+  popup.className = 'cat-popup';
+  popup.style.cssText = 'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.2);min-width:220px;max-width:300px;overflow:hidden';
+
+  let closeHandler;
+  const closePopup = () => { popup.remove(); document.removeEventListener('click', closeHandler, true); };
+  closeHandler = e => { if (!popup.contains(e.target)) closePopup(); };
+
+  // ── Kategorie-Liste ──
+  const listWrap = document.createElement('div');
+  listWrap.style.cssText = 'padding:0.35rem;max-height:220px;overflow-y:auto';
+
+  catList.forEach(c => {
+    const btn = document.createElement('button');
+    btn.style.cssText = 'display:flex;align-items:center;gap:6px;width:100%;padding:0.3rem 0.5rem;border:none;border-radius:5px;cursor:pointer;font-family:inherit;font-size:0.8rem;color:var(--text);text-align:left;background:'+(c.name===current?'var(--accent-light)':'none')+';';
+    btn.innerHTML = '<span style="width:8px;height:8px;border-radius:2px;background:'+(c.color||'#888')+';flex-shrink:0"></span>'+esc(c.name);
+    btn.onclick = () => reassignCat(txKey, c.name);
+    listWrap.appendChild(btn);
+  });
+
+  if (loadCatOverrides()[txKey]) {
+    const sep = document.createElement('div');
+    sep.style.cssText = 'border-top:1px solid var(--border);margin:0.25rem 0';
+    listWrap.appendChild(sep);
+    const resetBtn = document.createElement('button');
+    resetBtn.style.cssText = 'display:flex;align-items:center;gap:5px;width:100%;padding:0.3rem 0.5rem;background:none;border:none;border-radius:5px;cursor:pointer;font-family:inherit;font-size:0.75rem;color:var(--muted)';
+    resetBtn.innerHTML = '&#8635; Automatisch kategorisieren';
+    resetBtn.onclick = () => reassignCat(txKey, null);
+    listWrap.appendChild(resetBtn);
+  }
+  popup.appendChild(listWrap);
+
+  // ── Schlüsselwort-Abschnitt ──
+  const kwSection = document.createElement('div');
+  kwSection.style.cssText = 'border-top:1px solid var(--border);padding:0.5rem 0.6rem;background:var(--bg)';
+
+  const kwLabel = document.createElement('div');
+  kwLabel.style.cssText = 'font-size:0.7rem;color:var(--muted);font-weight:500;margin-bottom:0.35rem';
+  kwLabel.textContent = '+ Schlüsselwort speichern';
+  kwSection.appendChild(kwLabel);
+
+  const kwRow = document.createElement('div');
+  kwRow.style.cssText = 'display:flex;gap:0.3rem;align-items:center;margin-bottom:0.35rem';
+
+  const kwInput = document.createElement('input');
+  kwInput.type = 'text';
+  kwInput.value = suggestedKw;
+  kwInput.placeholder = 'Stichwort…';
+  kwInput.style.cssText = 'flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:0.22rem 0.4rem;font-size:0.78rem;color:var(--text);font-family:inherit';
+
+  const kwArrow = document.createElement('span');
+  kwArrow.style.cssText = 'font-size:0.75rem;color:var(--muted);flex-shrink:0';
+  kwArrow.textContent = '→';
+
+  const kwSelect = document.createElement('select');
+  kwSelect.style.cssText = 'flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:0.22rem 0.3rem;font-size:0.78rem;color:var(--text);font-family:inherit;cursor:pointer';
+  catList.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.name;
+    opt.textContent = c.name;
+    if (c.name === current) opt.selected = true;
+    kwSelect.appendChild(opt);
+  });
+
+  kwRow.appendChild(kwInput);
+  kwRow.appendChild(kwArrow);
+  kwRow.appendChild(kwSelect);
+  kwSection.appendChild(kwRow);
+
+  const kwBtn = document.createElement('button');
+  kwBtn.style.cssText = 'width:100%;background:var(--accent-light);color:var(--accent);border:none;border-radius:5px;padding:0.28rem 0;font-size:0.78rem;cursor:pointer;font-family:inherit;font-weight:500';
+  kwBtn.textContent = 'Hinzufügen';
+  kwBtn.onclick = e => {
+    e.stopPropagation();
+    const kw = kwInput.value.trim().toLowerCase();
+    if (!kw) { kwInput.focus(); return; }
+    addKeywordToCat(kw, kwSelect.value, isExp);
+    closePopup();
+  };
+  kwInput.addEventListener('keydown', e => { if (e.key === 'Enter') kwBtn.click(); });
+  kwSection.appendChild(kwBtn);
+  popup.appendChild(kwSection);
+
+  // ── Positionierung ──
+  const rect = badgeEl.getBoundingClientRect();
+  const listH = Math.min(catList.length * 33, 220) + (loadCatOverrides()[txKey] ? 36 : 0);
+  const totalH = listH + 110;
+  const top = rect.bottom + 4 + totalH > window.innerHeight ? rect.top - totalH - 4 : rect.bottom + 4;
+  popup.style.top = top + 'px';
+  popup.style.left = Math.min(rect.left, window.innerWidth - 305) + 'px';
+  document.body.appendChild(popup);
+
+  setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
+}
+
+function addKeywordToCat(kw, catName, isExp) {
+  const gridId = isExp ? 'catGrid' : 'incCatGrid';
+  for (const rule of document.querySelectorAll(`#${gridId} .cat-rule`)) {
+    const nameIn = rule.querySelector('.cat-name-in');
+    if (nameIn?.value.trim() !== catName) continue;
+    const kwIn = rule.querySelector('.cat-kw-in');
+    const existing = kwIn.value.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+    if (!existing.includes(kw)) {
+      kwIn.value = kwIn.value.trim() ? kwIn.value.trim() + ', ' + kw : kw;
+      if (isExp) saveCats(); else saveIncCats();
+    }
+    return;
+  }
+}
+
+function reassignCat(txKey, catName) {
+  document.querySelectorAll('.cat-popup').forEach(p => p.remove());
+  saveCatOverride(txKey, catName);
+
+  const badge = document.querySelector(`.badge[data-txkey="${CSS.escape(txKey)}"]`);
+  if (badge) {
+    const isExp = badge.dataset.isexp === '1';
+    const cats = isExp ? getCats().filter(c => c.name) : getIncCats().filter(c => c.name);
+    let effectiveCat = catName;
+    if (effectiveCat === null) {
+      const tx = allTx.find(t => getTxKey(t) === txKey);
+      effectiveCat = tx ? (isExp ? categorize(tx.desc, cats) : categorizeInc(tx.desc)) : (cats[cats.length - 1]?.name || '');
+    }
+    const col = cats.find(c => c.name === effectiveCat)?.color || '#888';
+    const isOvr = catName !== null;
+    badge.dataset.curcat = effectiveCat;
+    badge.style.background = col + '22';
+    badge.style.color = col;
+    badge.style.outline = isOvr ? `1px dashed ${col}` : 'none';
+    badge.style.outlineOffset = isOvr ? '1px' : '';
+    badge.title = isOvr ? 'Manuell kategorisiert – klicken zum Ändern' : 'Klicken zum Umkategorisieren';
+    badge.innerHTML = esc(effectiveCat) + (isOvr ? ' <span style="font-size:0.65em">✎</span>' : '');
+    const tr = badge.closest('tr');
+    if (tr) tr.dataset.cat = effectiveCat;
+  }
+
+  pendingCatChanges++;
+  showPendingBanner();
+}
+
+function toggleMonth(mkSafe) {
+  const el   = document.getElementById('monthbody_' + mkSafe);
+  const icon = document.getElementById('mtoggle_' + mkSafe);
+  if (!el) return;
+  const collapsed = el.style.display === 'none';
+  el.style.display = collapsed ? '' : 'none';
+  if (icon) icon.innerHTML = collapsed ? '&#9660;' : '&#9654;';
+  if (collapsed) {
+    const c = chartInstances['chart_pie_' + mkSafe];
+    if (c) c.resize();
+  }
+}
+function toggleYear(yr) {
+  const el   = document.getElementById('yearblocks_' + yr);
+  const icon = document.getElementById('ytoggle_' + yr);
+  if (!el) return;
+  const collapsed = el.style.display === 'none';
+  el.style.display = collapsed ? '' : 'none';
+  if (icon) icon.innerHTML = collapsed ? '&#9660;' : '&#9654;';
 }
 
 renderCatGrid();
 renderIncCatGrid();
 document.getElementById('excludeKw').value = loadExclude();
-window.addEventListener('beforeunload', () => { saveCats(); saveIncCats(); saveExclude(); });
+loadZeitraum();
+window.addEventListener('beforeunload', () => {
+  saveCats(); saveIncCats(); saveExclude(); saveZeitraum();
+  if (sqlDb && _dbSaveTimer) { clearTimeout(_dbSaveTimer); saveDbToFile(); }
+});
 
 dbInitPromise = initDB().catch(err => {
   console.warn('SQLite konnte nicht initialisiert werden:', err);
