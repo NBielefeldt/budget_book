@@ -813,6 +813,39 @@ function getTxCount() {
   return sqlDb.exec('SELECT COUNT(*) FROM transactions')[0]?.values[0][0] || 0;
 }
 
+// ── Lohn/Gehalt: Abrechnungsmonat statt Buchungsmonat ────
+// Arbeitgeber überweisen Lohn, Gehalt und Abschlag meist erst im Folgemonat
+// (z.B. Buchung 03.08.2026 · "Abschlag fuer 07/2026"). Für die Auswertung zählt
+// der Abrechnungsmonat aus dem Verwendungszweck, nicht der Buchungstag.
+const WAGE_KEYWORDS  = ['lohn','gehalt','abschlag'];
+// MM/JJJJ – nur der Schrägstrich trennt, bewusst kein Punkt: in "15.06.2024" wäre der
+// erste Punkt selbst die Nicht-Ziffer-Grenze und "06.2024" würde als Zeitraum gelesen.
+// Die vierstellige 20xx-Gruppe und die Nicht-Ziffer-Ränder halten Referenznummern
+// wie "EREF: 000000166/000005" draußen. Bei mehreren Treffern gilt der erste.
+const WAGE_PERIOD_RE = /(^|[^\d])(0?[1-9]|1[0-2])\/(20\d{2})(?!\d)/;
+
+// Abstand zweier 'YYYY-MM'-Schlüssel in Monaten (a - b)
+function monthKeyDiff(a, b) {
+  const [ay, am] = a.split('-').map(Number);
+  const [by, bm] = b.split('-').map(Number);
+  return (ay - by) * 12 + (am - bm);
+}
+
+// Liefert den Abrechnungsmonat 'YYYY-MM', wenn die Buchung eine Lohnzahlung mit
+// abweichendem Zeitraum ist – sonst null.
+function wagePeriodMonthKey(payee, purpose, bookingMonth) {
+  const low = (payee + ' ' + purpose).toLowerCase();
+  if (!WAGE_KEYWORDS.some(k => keywordMatches(low, k))) return null;
+  const m = low.match(WAGE_PERIOD_RE);
+  if (!m) return null;
+  const mk = m[3] + '-' + String(+m[2]).padStart(2, '0');
+  if (mk === bookingMonth) return null;
+  // Plausibilität: höchstens ein Quartal rückwirkend, höchstens ein Monat im Voraus
+  const diff = monthKeyDiff(mk, bookingMonth);
+  if (diff < -3 || diff > 1) return null;
+  return mk;
+}
+
 function loadAllTxFromDb() {
   if (!sqlDb) return;
   allTx = [];
@@ -821,10 +854,14 @@ function loadAllTxFromDb() {
     res[0].values.forEach(([id, date_iso, amount, payee, purpose, bank, dup_seq]) => {
       const d = parseDate(date_iso);
       if (!d) return;
+      const bookingMonth = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+      const wageMonth = amount > 0 ? wagePeriodMonthKey(payee || '', purpose || '', bookingMonth) : null;
       allTx.push({
         id,
         date: d,
-        monthKey: d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'),
+        bookingMonth,
+        monthKey: wageMonth || bookingMonth,
+        wageMonth,
         amount,
         absAmt: Math.abs(amount),
         isExpense: amount < 0,
@@ -1288,7 +1325,7 @@ function searchTx() {
       hlPurpose = (start > 0 ? '<span style="opacity:.5">…</span>' : '') + hlRaw(purposeFull.substring(start, end), q) + (end < purposeFull.length ? '<span style="opacity:.5">…</span>' : '');
     }
     html += `<tr>
-      <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+      <td style="white-space:nowrap">${dateCellHtml(tx)}</td>
       <td style="font-weight:500">${hlRaw(tx.payee||'', q)}</td>
       <td style="color:var(--muted)">${hlPurpose}</td>
       <td><span class="badge" style="background:${col}22;color:${col}">${esc(tx.cat)}</span></td>
@@ -1932,7 +1969,7 @@ function runReport() {
         const fondsBadge = ff ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:8px;background:var(--amber-light);color:var(--amber);margin-left:3px;white-space:nowrap">${esc(ff.name)}</span>` : '';
         const isOvr = !!overrides[txk];
         html+=`<tr data-cat="${esc(tx.cat)}">
-          <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+          <td style="white-space:nowrap">${dateCellHtml(tx)}</td>
           <td style="font-weight:500">${esc(tx.payee||tx.desc.substring(0,40))}</td>
           <td style="color:var(--muted)">${esc(ps)}</td>
           <td><span class="badge" data-txkey="${esc(txk)}" data-isexp="0" data-curcat="${esc(tx.cat)}" style="background:${col}22;color:${col};cursor:pointer${isOvr?';outline:1px dashed '+col+';outline-offset:1px':''}" title="${isOvr?'Manuell kategorisiert – klicken zum Ändern':'Klicken zum Umkategorisieren'}" onclick="showCatPopup(this)">${esc(tx.cat)}${isOvr?' <span style="font-size:0.65em">✎</span>':''}</span>${fondsBadge}</td>
@@ -2102,6 +2139,14 @@ function runReport() {
   }, 60);
 }
 
+// Datumszelle: Buchungsdatum, bei verschobenen Lohnzahlungen zusätzlich der Abrechnungsmonat
+function dateCellHtml(tx) {
+  const base = tx.date.toLocaleDateString('de-DE');
+  if (!tx.wageMonth) return base;
+  const [y, m] = tx.wageMonth.split('-');
+  const title = `Gebucht am ${base} &ndash; dem Lohnmonat ${m}/${y} zugeordnet`;
+  return `${base}<div style="font-size:0.68rem;color:var(--muted);font-weight:400" title="${title}">&#10551;&nbsp;${m}/${y}</div>`;
+}
 function fmt(n) { return new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(n); }
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -2566,7 +2611,7 @@ function renderFondsModal() {
           <table class="fonds-tx-tbl"><thead><tr><th>Datum</th><th>Transaktion</th><th style="text-align:right">Betrag</th></tr></thead><tbody>`;
         allF.forEach(tx => {
           html += `<tr>
-            <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+            <td style="white-space:nowrap">${dateCellHtml(tx)}</td>
             <td>${esc((tx.payee||tx.desc||'').substring(0,50))}</td>
             <td style="text-align:right;color:${tx.isIncome?'var(--success)':'var(--danger)'};white-space:nowrap">
               ${tx.isIncome?'+':'–'}${fmt(tx.absAmt)}</td></tr>`;
@@ -2605,7 +2650,7 @@ function renderFondsModal() {
       const ps   = (tx.purpose||'').substring(0,60);
       html += `<tr data-type="${iI?'inc':'exp'}" data-assigned="${aFId?'yes':'no'}"
         data-search="${esc(((tx.payee||'')+' '+(tx.purpose||'')).toLowerCase())}">
-        <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+        <td style="white-space:nowrap">${dateCellHtml(tx)}</td>
         <td><span style="font-size:0.7rem;padding:1px 6px;border-radius:10px;white-space:nowrap;
           background:${iI?'var(--success-light)':'var(--danger-light)'};
           color:${iI?'var(--success)':'var(--danger)'}">
