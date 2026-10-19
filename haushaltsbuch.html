@@ -101,6 +101,15 @@
   .trend-mode-btn:first-child { border-left: none; }
   .trend-mode-btn.active { background: var(--accent); color: #fff; }
   .trend-mode-btn:not(.active):hover { color: var(--text); }
+  .trend-row { cursor: pointer; }
+  .trend-row:hover td { background: var(--bg); }
+  .trend-row.sel td { background: var(--accent-light); }
+  .trend-drill { border-top: 1px solid var(--border); margin-top: 1.25rem; padding-top: 1rem; }
+  .trend-drill h4 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 500; margin: 1.25rem 0 0.25rem; }
+  .trend-kpis { display: flex; gap: 1.75rem; flex-wrap: wrap; margin: 0.75rem 0 0.25rem; }
+  .trend-kpi small { display: block; font-size: 0.72rem; color: var(--muted); }
+  .trend-kpi strong { font-size: 1rem; font-weight: 500; }
+  .trend-kpi span { font-size: 0.75rem; color: var(--muted); }
   .exclude-box { background: var(--danger-light); border: 1px solid rgba(153,60,29,0.2); border-radius: 8px; padding: 0.75rem 1rem; margin-top: 1rem; }
   .exclude-box label { font-size: 0.8rem; color: var(--danger); font-weight: 500; display: block; margin-bottom: 0.4rem; }
   .exclude-box input { width: 100%; background: transparent; border: none; border-bottom: 1px solid rgba(153,60,29,0.3); color: var(--text); font-size: 0.8rem; padding: 0.2rem 0; font-family: inherit; }
@@ -683,8 +692,10 @@ function migrateLocalStorageToDb() {
 function reloadAppFromDb() {
   renderCatGrid();
   renderIncCatGrid();
+  snapshotCats();
   document.getElementById('excludeKw').value = loadExclude();
   loadZeitraum();
+  abgrenzungAktiv = loadAbgrenzung();
   renderManualTxList();
 }
 
@@ -817,12 +828,24 @@ function getTxCount() {
 // Arbeitgeber überweisen Lohn, Gehalt und Abschlag meist erst im Folgemonat
 // (z.B. Buchung 03.08.2026 · "Abschlag fuer 07/2026"). Für die Auswertung zählt
 // der Abrechnungsmonat aus dem Verwendungszweck, nicht der Buchungstag.
-const WAGE_KEYWORDS  = ['lohn','gehalt','abschlag'];
+const WAGE_KEYWORDS  = ['lohn','gehalt','abschlag','elterngeld'];
+// Elterngeld läuft andersherum: gebucht am Monatsende für den Folgemonat ("ELG 11/25",
+// gebucht 31.10.2025). Das zweistellige Jahr ist nur zusammen mit dem ELG-Präfix sicher
+// genug – generisch wäre "11/25" viel zu häufig ein Zufallstreffer.
+const ELG_PERIOD_RE  = /\bELG\s+(0?[1-9]|1[0-2])\/(\d{2})\b/i;
 // MM/JJJJ – nur der Schrägstrich trennt, bewusst kein Punkt: in "15.06.2024" wäre der
 // erste Punkt selbst die Nicht-Ziffer-Grenze und "06.2024" würde als Zeitraum gelesen.
 // Die vierstellige 20xx-Gruppe und die Nicht-Ziffer-Ränder halten Referenznummern
 // wie "EREF: 000000166/000005" draußen. Bei mehreren Treffern gilt der erste.
 const WAGE_PERIOD_RE = /(^|[^\d])(0?[1-9]|1[0-2])\/(20\d{2})(?!\d)/;
+
+// Der neuere Bankexport bricht den Verwendungszweck etwa alle 27 Zeichen um und setzt das
+// Leerzeichen dabei mitten in ein Token ("01.08.2 026", "01.03 .2026"). Fürs Matching werden
+// Leerzeichen zwischen einer Ziffer und einer Ziffer bzw. einem Punkt entfernt. Das wird
+// immer nur als ZWEITER Versuch benutzt, nachdem der unveränderte Text nichts ergeben hat –
+// so kann sich am Verhalten für unversehrte Texte nichts ändern, und das Zusammenziehen
+// unbeteiligter Zahlen (aus "Schwalbenweg 4 32312" wird "432312") bleibt folgenlos.
+function unwrapDigits(s) { return s.replace(/(\d)\s+(?=[\d.])/g, '$1'); }
 
 // Abstand zweier 'YYYY-MM'-Schlüssel in Monaten (a - b)
 function monthKeyDiff(a, b) {
@@ -836,14 +859,83 @@ function monthKeyDiff(a, b) {
 function wagePeriodMonthKey(payee, purpose, bookingMonth) {
   const low = (payee + ' ' + purpose).toLowerCase();
   if (!WAGE_KEYWORDS.some(k => keywordMatches(low, k))) return null;
-  const m = low.match(WAGE_PERIOD_RE);
-  if (!m) return null;
-  const mk = m[3] + '-' + String(+m[2]).padStart(2, '0');
+  const elg = purpose.match(ELG_PERIOD_RE) || unwrapDigits(purpose).match(ELG_PERIOD_RE);
+  const m   = elg ? null : (low.match(WAGE_PERIOD_RE) || unwrapDigits(low).match(WAGE_PERIOD_RE));
+  if (!elg && !m) return null;
+  const mk = elg
+    ? '20' + elg[2] + '-' + String(+elg[1]).padStart(2, '0')
+    : m[3] + '-' + String(+m[2]).padStart(2, '0');
   if (mk === bookingMonth) return null;
   // Plausibilität: höchstens ein Quartal rückwirkend, höchstens ein Monat im Voraus
   const diff = monthKeyDiff(mk, bookingMonth);
   if (diff < -3 || diff > 1) return null;
   return mk;
+}
+
+// ── Rechnungsabgrenzung: Zeitraum aus dem Verwendungszweck ──
+// Manche Zahlungen decken einen im Text genannten Zeitraum ab (Rundfunkbeitrag je Quartal,
+// Kfz-Versicherung je Halbjahr, Kfz-Steuer und Rechtsschutz je Jahr). Für die Auswertung
+// zählt nicht der Zahltag, sondern der Zeitraum – der Betrag wird gleichmäßig verteilt.
+const ACC_SEP        = '(?:\\s*(?:-|\u2013|bis zum|bis)\\s*)';
+const ACC_DATE_RE    = new RegExp('(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2}(?:\\d{2})?)' + ACC_SEP + '(\\d{1,2})\\.(\\d{1,2})\\.(\\d{2}(?:\\d{2})?)', 'i');
+const ACC_MONTH_RE   = new RegExp('(?:^|[^\\d])(\\d{1,2})[./](\\d{4})' + ACC_SEP + '(\\d{1,2})[./](\\d{4})(?!\\d)', 'i');
+const ACC_MIN_DAYS   = 45;   // sperrt kurze Datumsspannen (z.B. ein Urlaub über die Monatsgrenze)
+const ACC_MAX_MONTHS = 24;
+// Vermögensbildung und Ratenrückzahlungen sind kein laufender Aufwand und werden nicht abgegrenzt.
+const ACC_EXCLUDE    = ['bauspar','sparrate','sparraten','monatliche rate'];
+
+const y4 = y => (y.length === 4 ? +y : 2000 + +y);
+function addMonths(mk, n) {
+  const [y, m] = mk.split('-').map(Number);
+  const t = y * 12 + (m - 1) + n;
+  return Math.floor(t / 12) + '-' + String(t % 12 + 1).padStart(2, '0');
+}
+
+// Liefert { start, months } wenn die Buchung über mehrere Monate abzugrenzen ist – sonst null.
+// Erst am Originaltext, dann am reparierten (siehe unwrapDigits).
+function accrualPeriod(payee, purpose, bookingMonth) {
+  const low = (payee + ' ' + purpose).toLowerCase();
+  if (ACC_EXCLUDE.some(k => low.includes(k))) return null;
+  return accrualFrom(purpose, bookingMonth) || accrualFrom(unwrapDigits(purpose), bookingMonth);
+}
+
+function accrualFrom(purpose, bookingMonth) {
+  let start = null, months = 0;
+  const d = purpose.match(ACC_DATE_RE);
+  if (d) {
+    const sd = +d[1], sM = +d[2], sY = y4(d[3]), ed = +d[4], eM = +d[5], eY = y4(d[6]);
+    if (sM < 1 || sM > 12 || eM < 1 || eM > 12) return null;
+    // Mindestlänge in Tagen, damit kurze Aufenthalte nicht als Abrechnungszeitraum gelten
+    if ((new Date(eY, eM - 1, ed) - new Date(sY, sM - 1, sd)) / 86400000 < ACC_MIN_DAYS) return null;
+    start  = sY + '-' + String(sM).padStart(2, '0');
+    months = monthKeyDiff(eY + '-' + String(eM).padStart(2, '0'), start) + (ed > sd ? 1 : 0);
+  } else {
+    const m = purpose.match(ACC_MONTH_RE);
+    if (!m) return null;
+    const sM = +m[1], sY = +m[2], eM = +m[3], eY = +m[4];
+    if (sM < 1 || sM > 12 || eM < 1 || eM > 12) return null;
+    start  = sY + '-' + String(sM).padStart(2, '0');
+    months = monthKeyDiff(eY + '-' + String(eM).padStart(2, '0'), start) + 1;
+  }
+  if (months < 2 || months > ACC_MAX_MONTHS) return null;
+  // Plausibilität: der Zeitraum muss etwas mit dem Buchungsmonat zu tun haben
+  if (monthKeyDiff(addMonths(start, months - 1), bookingMonth) < -1) return null;
+  if (monthKeyDiff(start, bookingMonth) > 1) return null;
+  return { start, months };
+}
+
+// Zerlegt eine Buchung in die Teilbeträge, mit denen die Auswertung rechnet. In der
+// Zahlungssicht – und bei allem, was keinen Zeitraum nennt – ist das die Buchung selbst.
+// Ein Slice ist eine flache Kopie mit anderem monthKey und absAmt; für den Rechenteil
+// ist er von einer echten Buchung nicht zu unterscheiden. Slices dürfen nie in Tabellen,
+// getTxKey(), showCatPopup() oder die Fonds-Zuordnung geraten.
+function sliceTx(tx) {
+  if (!abgrenzungAktiv || !tx.accrual) return [tx];
+  const { start, months } = tx.accrual;
+  const share = tx.absAmt / months;
+  const out = [];
+  for (let i = 0; i < months; i++) out.push({ ...tx, monthKey: addMonths(start, i), absAmt: share });
+  return out;
 }
 
 function loadAllTxFromDb() {
@@ -855,13 +947,17 @@ function loadAllTxFromDb() {
       const d = parseDate(date_iso);
       if (!d) return;
       const bookingMonth = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-      const wageMonth = amount > 0 ? wagePeriodMonthKey(payee || '', purpose || '', bookingMonth) : null;
+      // Vorrang: ein mehrmonatiger Zeitraum wird abgegrenzt, sonst greift die Verschiebung
+      const accrual   = accrualPeriod(payee || '', purpose || '', bookingMonth);
+      const wageMonth = (!accrual && amount > 0)
+        ? wagePeriodMonthKey(payee || '', purpose || '', bookingMonth) : null;
       allTx.push({
         id,
         date: d,
         bookingMonth,
         monthKey: wageMonth || bookingMonth,
         wageMonth,
+        accrual,
         amount,
         absAmt: Math.abs(amount),
         isExpense: amount < 0,
@@ -937,10 +1033,21 @@ let chartInstances = {};
 let fondsChartInstances = {};
 let pendingCatChanges = 0;
 let configChanged = false;
+// Kategorie-Stand, gegen den manuelle Zuordnungen zuletzt auf Mehrdeutigkeit geprüft wurden:
+// {exp:[{name,kw}], inc:[{name,kw}]}. Gesetzt beim Laden und nach jeder erfolgreichen Vorab-Prüfung.
+let ambigBaseline = null;
+function snapshotCats() {
+  const pick = c => ({ name: c.name, kw: c.kw });
+  ambigBaseline = {
+    exp: getCats().filter(c => c.name).map(pick),
+    inc: getIncCats().filter(c => c.name).map(pick),
+  };
+}
 let suppressPendingBanner = false;
 let trendMode = 'month';
 let trendMonthData = null;
 let trendCatVisible = null; // Set<string> Kategorien, die aktuell im Trend-Chart eingeblendet sind
+let trendDrillCat = null;   // Kategorie, deren Ursachenanalyse unter der Trend-Tabelle offen ist (nicht persistiert)
 
 function showPendingBanner() {
   if (suppressPendingBanner) return;
@@ -1207,6 +1314,12 @@ function categorize(desc, cats) {
   return cats[cats.length-1]?.name || 'Sonstiges';
 }
 
+function sameCatNames(a, b) {
+  if (a.length !== b.length) return false;
+  const names = new Set(a.map(c => c.name));
+  return b.every(c => names.has(c.name));
+}
+
 function getAllMatches(desc, cats) {
   const low = (desc||'').toLowerCase();
   const matches = [];
@@ -1256,6 +1369,28 @@ function updateZeitraumSummary() {
   if (!from && !to) { el.textContent = 'Gesamter Zeitraum'; return; }
   const fmtM = m => { const [y,mo] = m.split('-'); return new Date(+y,+mo-1,1).toLocaleDateString('de-DE',{month:'short',year:'numeric'}); };
   el.textContent = [from && 'ab ' + fmtM(from), to && 'bis ' + fmtM(to)].filter(Boolean).join(' · ');
+}
+
+// ── Abgrenzungssicht an/aus ─────────────────────
+// true = Zahlungen mit Zeitraum werden über ihre Monate verteilt, false = Zahlungssicht.
+let abgrenzungAktiv = true;
+
+function loadAbgrenzung() {
+  const fromDb = dbGetSetting('abgrenzung');
+  if (fromDb !== null) return !!fromDb;
+  try { const v = localStorage.getItem('abgrenzung_v1'); if (v !== null) return v === 'true'; } catch(e){}
+  return true;
+}
+function saveAbgrenzung() {
+  if (sqlDb) dbSetSetting('abgrenzung', abgrenzungAktiv);
+  else try { localStorage.setItem('abgrenzung_v1', String(abgrenzungAktiv)); } catch(e){}
+}
+// Der Umschalter rendert direkt neu. configChanged wird bewusst NICHT gesetzt – das
+// würde runReport() dazu bringen, alle Overrides erneut auf Mehrdeutigkeit zu prüfen.
+function setAbgrenzung(on) {
+  abgrenzungAktiv = !!on;
+  saveAbgrenzung();
+  runReport();
 }
 
 // ── Kategorie-Trends: gespeicherte Sichtbarkeitsauswahl ──
@@ -1429,9 +1564,6 @@ function showAmbiguityModal(ambiguous, onConfirm) {
 
 // ── Report ────────────────────────────────────────────────
 function runReport() {
-  // vor hidePendingBanner() sichern: zeigt an, ob seit dem letzten Bericht Kategorie-Schlüsselwörter
-  // geändert wurden – dann müssen auch manuell zugeordnete Buchungen erneut auf Mehrdeutigkeit geprüft werden
-  const catsWereEdited = configChanged;
   hidePendingBanner();
   suppressPendingBanner = true;
   const cats = getCats().filter(c=>c.name); saveCats(); saveIncCats(); saveExclude();
@@ -1439,7 +1571,8 @@ function runReport() {
   configChanged = false;
   const overrides = loadCatOverrides();
 
-  // Vorab-Prüfung: Buchungen mit mehrfachen Keyword-Treffern und ohne manuelles Override
+  // Vorab-Prüfung: Buchungen mit mehrfachen Keyword-Treffern. Manuell zugeordnete Buchungen nur dann,
+  // wenn sich ihre Treffermenge gegenüber ambigBaseline geändert hat – sonst ist die Zuordnung weiter gültig.
   {
     const fFrom = document.getElementById('filterFrom').value;
     const fTo   = document.getElementById('filterTo').value;
@@ -1448,15 +1581,20 @@ function runReport() {
     const ambiguous = [];
     allTx.filter(tx => !isExcluded(tx.desc) && inR(tx)).forEach(tx => {
       const k = getTxKey(tx);
-      if (overrides[k] && !catsWereEdited) return;
       const catList = tx.isExpense ? cats : incCats;
       const matches = getAllMatches(tx.desc, catList);
-      if (matches.length > 1) ambiguous.push({ tx, matches, key: k, currentOverride: overrides[k] });
+      if (matches.length <= 1) return;
+      if (overrides[k]) {
+        const baseList = tx.isExpense ? ambigBaseline?.exp : ambigBaseline?.inc;
+        if (!baseList || sameCatNames(getAllMatches(tx.desc, baseList), matches)) return;
+      }
+      ambiguous.push({ tx, matches, key: k, currentOverride: overrides[k] });
     });
     if (ambiguous.length > 0) {
       showAmbiguityModal(ambiguous, () => runReport());
       return;
     }
+    snapshotCats();
   }
 
   const activeFonds = loadFonds();
@@ -1473,20 +1611,40 @@ function runReport() {
   const filterFrom = document.getElementById('filterFrom').value;
   const filterTo   = document.getElementById('filterTo').value;
   const inRange = tx => (!filterFrom || tx.monthKey >= filterFrom) && (!filterTo || tx.monthKey <= filterTo);
-  const activeTx = allTx.filter(tx => !tx.excluded && inRange(tx));
   const excludedCount = allTx.filter(tx => tx.excluded && inRange(tx)).length;
 
+  // Tabellen zeigen echte Buchungen, gefiltert nach ihrem Buchungsmonat.
+  const bookingTx = allTx.filter(tx => !tx.excluded && inRange(tx));
+  const monthsTx = {};
+  bookingTx.forEach(tx => { if(!monthsTx[tx.monthKey]) monthsTx[tx.monthKey]=[]; monthsTx[tx.monthKey].push(tx); });
+  const sorted = Object.keys(monthsTx).sort();
+  const monthSet = new Set(sorted);
+
+  // Aggregationen rechnen mit Slices. Geschnitten wird aus allTx und nicht aus bookingTx,
+  // sonst verlöre ein enger Zeitraumfilter die Anteile von Buchungen außerhalb des Fensters.
+  // Slices außerhalb von sorted entfallen – so entstehen keine leeren Monatsblöcke und
+  // sorted bleibt Monatsliste, Ø-Divisor und Diagrammachse in einem.
+  // activeTx/months behalten ihre Namen, damit der gesamte Rechenteil unverändert bleibt.
+  const activeTx = [];
+  allTx.forEach(tx => {
+    if (tx.excluded) return;
+    sliceTx(tx).forEach(sl => { if (monthSet.has(sl.monthKey)) activeTx.push(sl); });
+  });
   const months = {};
-  activeTx.forEach(tx => { if(!months[tx.monthKey]) months[tx.monthKey]=[]; months[tx.monthKey].push(tx); });
-  const sorted = Object.keys(months).sort();
+  activeTx.forEach(sl => { if(!months[sl.monthKey]) months[sl.monthKey]=[]; months[sl.monthKey].push(sl); });
 
   const yearGroups = {};
   sorted.forEach(mk => { const y = mk.split('-')[0]; if(!yearGroups[y]) yearGroups[y]=[]; yearGroups[y].push(mk); });
   const sortedYears = Object.keys(yearGroups).sort();
   const isMultiYear = sortedYears.length > 1;
 
-  let html = `<div style="display:flex;justify-content:flex-end;margin-bottom:0.75rem">
-    <button style="background:var(--amber-light);color:var(--amber);border:1px solid rgba(186,117,23,0.3);border-radius:20px;padding:0.35rem 0.9rem;font-size:0.78rem;cursor:pointer;font-family:inherit" onclick="openFondsModal()">Budget-Töpfe</button>
+  const _pill = (on, label, val, title) => `<button title="${title}" onclick="setAbgrenzung(${val})" style="border:none;border-radius:16px;padding:0.3rem 0.8rem;font-size:0.75rem;cursor:pointer;font-family:inherit;${on?'background:var(--accent);color:#fff;font-weight:600':'background:none;color:var(--muted)'}">${label}</button>`;
+  let html = `<div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem">
+    <div style="display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:18px">
+      ${_pill(abgrenzungAktiv, 'Abgrenzung', true, 'Zahlungen mit Zeitraum werden gleichmäßig über ihre Monate verteilt')}
+      ${_pill(!abgrenzungAktiv, 'Zahlung', false, 'Jede Buchung zählt in ihrem Buchungsmonat – die tatsächliche Kontobewegung')}
+    </div>
+    <button style="margin-left:auto;background:var(--amber-light);color:var(--amber);border:1px solid rgba(186,117,23,0.3);border-radius:20px;padding:0.35rem 0.9rem;font-size:0.78rem;cursor:pointer;font-family:inherit" onclick="openFondsModal()">Budget-Töpfe</button>
   </div>`;
 
   if(filterFrom || filterTo) {
@@ -1653,7 +1811,11 @@ function runReport() {
     trendCatVisible = new Set(
       trendSavedVisible ? trendSavedVisible.filter(c=>trendAllCats.includes(c)) : trendAllCats.slice(0,6)
     );
-    trendMonthData = { sorted, catMonthTotals, catColors, order: trendAllCats, slopes };
+    // Slices je Kategorie für die Ursachenanalyse – nur lesend verwenden (kein getTxKey/showCatPopup)
+    const catTx = {};
+    trendAllCats.forEach(c=>{ catTx[c]=[]; });
+    allExp.forEach(tx=>{ if(catTx[tx.cat]) catTx[tx.cat].push(tx); });
+    trendMonthData = { sorted, catMonthTotals, catColors, order: trendAllCats, slopes, catTx };
     if(trendMode !== 'month' && trendMode !== 'cumulative') trendMode = 'month';
 
     html += `<div class="overview-card">
@@ -1668,6 +1830,7 @@ function runReport() {
       </div>
       <div style="position:relative;height:260px;margin-bottom:1.25rem"><canvas id="chart_trends" role="img" aria-label="Kategorie-Trends über die Zeit"></canvas></div>
       <div style="overflow-x:auto" id="trendTableWrap">${buildTrendTableHtml(trendMode)}</div>
+      <div id="trendDrillWrap"></div>
     </div>`;
   }
 
@@ -1806,12 +1969,18 @@ function runReport() {
         html += `</tbody></table></div>`;
       }
     }
-    const rows = months[mk];
+    const rows = monthsTx[mk] || [];      // echte Buchungen – Tabellen, Chips, Zähler
     const exp  = rows.filter(r=>r.isExpense);
     const inc  = rows.filter(r=>r.isIncome);
-    const totExp = exp.reduce((s,r)=>s+r.absAmt,0);
-    const totInc = inc.reduce((s,r)=>s+r.absAmt,0);
-    const catT = {}; exp.forEach(r=>{ catT[r.cat]=(catT[r.cat]||0)+r.absAmt; });
+    const slices = months[mk] || [];      // Slices – alle Summen dieses Monats
+    const expS = slices.filter(r=>r.isExpense);
+    const incS = slices.filter(r=>r.isIncome);
+    const totExp = expS.reduce((s,r)=>s+r.absAmt,0);
+    const totInc = incS.reduce((s,r)=>s+r.absAmt,0);
+    const catT = {}; expS.forEach(r=>{ catT[r.cat]=(catT[r.cat]||0)+r.absAmt; });
+    // Anteil, der aus einer Abgrenzung stammt – ggf. aus einer Buchung, die hier gar nicht steht
+    const accS = expS.filter(r=>r.accrual);
+    const accSum = accS.reduce((s,r)=>s+r.absAmt,0);
     const sortedCats = Object.entries(catT).sort((a,b)=>b[1]-a[1]);
     const maxC = sortedCats[0]?.[1]||1;
     const [yr,mn] = mk.split('-');
@@ -1833,6 +2002,13 @@ function runReport() {
         ${totInc>0?`<div class="stat-card"><div class="lbl">Saldo</div><div class="val">${fmt(totInc-totExp)}</div></div>`:''}
         <div class="stat-card"><div class="lbl">Buchungen</div><div class="val">${exp.length}</div></div>
       </div>`;
+
+    if(accSum > 0) {
+      const n = new Set(accS.map(r=>r.id)).size;
+      html += `<div style="font-size:0.75rem;color:var(--muted);margin:-0.25rem 0 0.75rem">
+        &#10551;&nbsp;davon ${fmt(accSum)} aus Abgrenzung (${n}&thinsp;Buchung${n!==1?'en':''}) &middot;
+        die zugehörige Zahlung kann in einem anderen Monat stehen</div>`;
+    }
 
     if(sortedCats.length && totInc === 0) {
       html += `<div style="display:grid;grid-template-columns:1fr 160px;gap:1rem;align-items:center">
@@ -1928,7 +2104,7 @@ function runReport() {
       const fondsBadge = ff ? `<span style="font-size:0.68rem;padding:1px 5px;border-radius:8px;background:var(--amber-light);color:var(--amber);margin-left:3px;white-space:nowrap">${esc(ff.name)}</span>` : '';
       const isOvr = !!overrides[txk];
       html += `<tr data-cat="${esc(tx.cat)}">
-        <td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+        <td style="white-space:nowrap">${dateCellHtml(tx)}</td>
         <td style="font-weight:500">${esc(tx.payee||tx.desc.substring(0,40))}</td>
         <td style="color:var(--muted)">${esc(purposeShort)}</td>
         <td><span class="badge" data-txkey="${esc(txk)}" data-isexp="1" data-curcat="${esc(tx.cat)}" style="background:${col}22;color:${col};cursor:pointer${isOvr?';outline:1px dashed '+col+';outline-offset:1px':''}" title="${isOvr?'Manuell kategorisiert – klicken zum Ändern':'Klicken zum Umkategorisieren'}" onclick="showCatPopup(this)">${esc(tx.cat)}${isOvr?' <span style="font-size:0.65em">✎</span>':''}</span>${fondsBadge}</td>
@@ -2074,6 +2250,9 @@ function runReport() {
           scales:{ y:{ ticks:{ callback:v=>fmt(v) } }, x:{ ticks:{ autoSkip:false,maxRotation:45 } } } }
       });
     }
+    // Offene Ursachenanalyse nach dem Neuaufbau wiederherstellen (Canvas wurde ersetzt)
+    if(trendDrillCat && document.getElementById('trendDrillWrap') && trendMonthData?.catTx[trendDrillCat]) renderTrendDrill(trendDrillCat);
+    else trendDrillCat = null;
 
     // Jahres-Diagramme (Kategorie-Balken, Torte, Monatsverlauf) je Kalenderjahr
     if(isMultiYear) sortedYears.forEach(yrKey => {
@@ -2142,48 +2321,121 @@ function runReport() {
 // Datumszelle: Buchungsdatum, bei verschobenen Lohnzahlungen zusätzlich der Abrechnungsmonat
 function dateCellHtml(tx) {
   const base = tx.date.toLocaleDateString('de-DE');
-  if (!tx.wageMonth) return base;
-  const [y, m] = tx.wageMonth.split('-');
-  const title = `Gebucht am ${base} &ndash; dem Lohnmonat ${m}/${y} zugeordnet`;
-  return `${base}<div style="font-size:0.68rem;color:var(--muted);font-weight:400" title="${title}">&#10551;&nbsp;${m}/${y}</div>`;
+  const hint = (label, title) =>
+    `${base}<div style="font-size:0.68rem;color:var(--muted);font-weight:400" title="${title}">&#10551;&nbsp;${label}</div>`;
+
+  if (abgrenzungAktiv && tx.accrual) {
+    const { start, months } = tx.accrual;
+    const end = addMonths(start, months - 1);
+    const lbl = m => { const [y, mo] = m.split('-'); return mo + '/' + y.slice(2); };
+    const label = lbl(start) + '\u2013' + lbl(end);
+    return hint(label, `Über ${months} Monate abgegrenzt, ${fmt(tx.absAmt / months)} je Monat`);
+  }
+  if (tx.wageMonth) {
+    const [y, m] = tx.wageMonth.split('-');
+    return hint(`${m}/${y}`, `Gebucht am ${base} &ndash; dem Lohnmonat ${m}/${y} zugeordnet`);
+  }
+  return base;
 }
 function fmt(n) { return new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(n); }
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function trendMonthLabel(mk) { const [y,m] = mk.split('-'); return new Date(+y,+m-1,1).toLocaleDateString('de-DE',{month:'short',year:'2-digit'}); }
 
-function buildTrendTableHtml(mode) {
-  if(!trendMonthData) return '';
-  const { sorted, catMonthTotals, catColors, order, slopes } = trendMonthData;
+// Vergleichszeiträume des gewählten Trend-Modus – von Tabelle und Ursachenanalyse gemeinsam
+// genutzt, damit beide exakt dieselben Zahlen zeigen. prevMonths ist null ohne Vorjahresdaten.
+function trendPeriods(mode) {
+  const { sorted } = trendMonthData;
   const lastMk = sorted[sorted.length-1];
   const [lastY, lastM] = lastMk.split('-');
-
-  let curLabel, prevLabel, curValFn, prevValFn;
+  const prevY = String(parseInt(lastY,10)-1);
   if(mode === 'cumulative') {
     const curMonths = sorted.filter(mk => mk.startsWith(lastY+'-') && mk <= lastMk);
-    const prevY = String(parseInt(lastY,10)-1);
-    const prevMonths = curMonths.map(mk => prevY+'-'+mk.split('-')[1]);
-    const prevAvailable = prevMonths.every(mk => sorted.includes(mk));
-    curLabel = `${trendMonthLabel(curMonths[0])}–${trendMonthLabel(lastMk)} ${lastY}`;
-    prevLabel = prevAvailable ? `${trendMonthLabel(prevMonths[0])}–${trendMonthLabel(prevMonths[prevMonths.length-1])} ${prevY}` : '';
-    curValFn  = cat => curMonths.reduce((s,mk)=>s+(catMonthTotals[cat][mk]||0),0);
-    prevValFn = cat => prevAvailable ? prevMonths.reduce((s,mk)=>s+(catMonthTotals[cat][mk]||0),0) : undefined;
-  } else {
-    const yoyMk = (parseInt(lastY,10)-1)+'-'+lastM;
-    const yoyAvailable = sorted.includes(yoyMk);
-    curLabel  = trendMonthLabel(lastMk);
-    prevLabel = yoyAvailable ? trendMonthLabel(yoyMk) : '';
-    curValFn  = cat => catMonthTotals[cat][lastMk]||0;
-    prevValFn = cat => yoyAvailable ? (catMonthTotals[cat][yoyMk]||0) : undefined;
+    const prevAll = curMonths.map(mk => prevY+'-'+mk.split('-')[1]);
+    const prevMonths = prevAll.every(mk => sorted.includes(mk)) ? prevAll : null;
+    return {
+      curMonths, prevMonths,
+      curLabel: `${trendMonthLabel(curMonths[0])}–${trendMonthLabel(lastMk)} ${lastY}`,
+      prevLabel: prevMonths ? `${trendMonthLabel(prevMonths[0])}–${trendMonthLabel(prevMonths[prevMonths.length-1])} ${prevY}` : ''
+    };
   }
+  const yoyMk = prevY+'-'+lastM;
+  const prevMonths = sorted.includes(yoyMk) ? [yoyMk] : null;
+  return { curMonths: [lastMk], prevMonths, curLabel: trendMonthLabel(lastMk), prevLabel: prevMonths ? trendMonthLabel(yoyMk) : '' };
+}
+
+// Händlerschlüssel: Filial-/Terminalnummern und Satzzeichen fallen weg, damit
+// „REWE SAGT DANKE 1234" und „… 5678" ein Händler sind.
+function payeeKey(tx) {
+  const raw = (tx.payee || tx.desc || '').toLowerCase();
+  const k = raw.replace(/\d{3,}/g,' ').replace(/[^a-zäöüß0-9]+/g,' ').replace(/\s+/g,' ').trim();
+  return k || raw.trim() || 'unbekannt';
+}
+
+// Zerlegt die Entwicklung einer Kategorie nach Händlern. Ohne Vorjahr dient der Ø der
+// früheren Monate (hochgerechnet auf die Länge des aktuellen Zeitraums) als Basis.
+// Rechnet auf Slices – nur lesend verwenden.
+function trendDriverData(cat, mode) {
+  if(!trendMonthData) return null;
+  const { sorted, catTx } = trendMonthData;
+  const per = trendPeriods(mode);
+  const curSet = new Set(per.curMonths);
+  let baseSet = null, scale = 1, baseLabel = per.prevLabel;
+  if(per.prevMonths) baseSet = new Set(per.prevMonths);
+  else {
+    const earlier = sorted.filter(mk => mk < per.curMonths[0]);
+    if(earlier.length) { baseSet = new Set(earlier); scale = per.curMonths.length/earlier.length; baseLabel = `Ø ${earlier.length} Vormonat${earlier.length>1?'e':''}`; }
+  }
+
+  const map = new Map();
+  (catTx[cat] || []).forEach(tx => {
+    const key = payeeKey(tx);
+    let e = map.get(key);
+    if(!e) { e = { key, names:{}, cur:0, curN:0, base:0, baseN:0, months:new Set() }; map.set(key, e); }
+    const nm = (tx.payee || tx.desc || 'unbekannt').trim().substring(0,40);
+    e.names[nm] = (e.names[nm]||0)+1;
+    e.months.add(tx.monthKey);
+    if(curSet.has(tx.monthKey)) { e.cur += tx.absAmt; e.curN++; }
+    if(baseSet && baseSet.has(tx.monthKey)) { e.base += tx.absAmt*scale; e.baseN += scale; }
+  });
+
+  const rows = [...map.values()].map(e => {
+    e.name = Object.entries(e.names).sort((a,b)=>b[1]-a[1])[0][0];
+    e.delta = e.cur - e.base;
+    e.recurring = e.months.size >= 3; // Buchungen in mindestens 3 Monaten
+    return e;
+  });
+  const sum = (arr, f) => arr.reduce((s,e)=>s+f(e), 0);
+  const rec = rows.filter(e=>e.recurring);
+  return {
+    per, baseLabel, hasBase: !!baseSet, scale,
+    rows, names: new Map(rows.map(e=>[e.key, e.name])),
+    cur: sum(rows,e=>e.cur), base: sum(rows,e=>e.base),
+    curN: sum(rows,e=>e.curN), baseN: sum(rows,e=>e.baseN),
+    recCur: sum(rec,e=>e.cur), recBase: sum(rec,e=>e.base)
+  };
+}
+
+function buildTrendTableHtml(mode) {
+  if(!trendMonthData) return '';
+  const { catMonthTotals, catColors, order, slopes } = trendMonthData;
+  const per = trendPeriods(mode);
+  const { curMonths, prevMonths, curLabel, prevLabel } = per;
+  const sumMonths = (cat, months) => months.reduce((s,mk)=>s+(catMonthTotals[cat][mk]||0),0);
+  const curValFn  = cat => sumMonths(cat, curMonths);
+  const prevValFn = cat => prevMonths ? sumMonths(cat, prevMonths) : undefined;
 
   const rows = order.map(cat => ({ cat, curVal: curValFn(cat), prevVal: prevValFn(cat) }));
   const hasPrev = rows.some(r => r.prevVal !== undefined);
 
+  // Haupttreiber: Händler mit dem größten Beitrag zur Veränderung
+  const drivers = order.map(cat => trendDriverData(cat, mode));
+  const hasDriver = drivers.some(d => d && d.hasBase);
+
   let html = `<table class="total-table">
-    <thead><tr><th>Kategorie</th>${hasPrev?`<th>${esc(prevLabel)} (Vorjahr)</th>`:''}<th>${esc(curLabel)}</th>${hasPrev?`<th>Δ ggü. Vorjahr</th>`:''}<th>Tendenz</th></tr></thead>
+    <thead><tr><th>Kategorie</th>${hasPrev?`<th>${esc(prevLabel)} (Vorjahr)</th>`:''}<th>${esc(curLabel)}</th>${hasPrev?`<th>Δ ggü. Vorjahr</th>`:''}<th>Tendenz</th>${hasDriver?`<th title="Händler mit dem größten Beitrag zur Veränderung – Klick auf die Zeile für die Ursachenanalyse">Haupttreiber</th>`:''}</tr></thead>
     <tbody>`;
-  rows.forEach(r => {
+  rows.forEach((r, i) => {
     const col = catColors[r.cat]||'#888';
     let prevCell = '', deltaCell = '';
     if(hasPrev) {
@@ -2202,10 +2454,18 @@ function buildTrendTableHtml(mode) {
     if(Math.abs(s.relSlope) < 3)  { trendLabel='stabil';   trendIcon='&#8594;'; trendCol='var(--muted)'; }
     else if(s.relSlope > 0)       { trendLabel='steigend'; trendIcon='&#8593;'; trendCol='var(--danger)'; }
     else                           { trendLabel='fallend';  trendIcon='&#8595;'; trendCol='var(--success)'; }
-    html += `<tr>
+    let driverCell = '';
+    if(hasDriver) {
+      const d = drivers[i];
+      const top = d && d.hasBase ? [...d.rows].sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta))[0] : null;
+      if(top && Math.abs(top.delta) >= 0.5) {
+        driverCell = `<td style="color:${top.delta>0?'var(--danger)':'var(--success)'}" title="${esc(top.name)}">${esc(top.name.substring(0,24))} ${top.delta>=0?'+':''}${fmt(top.delta)}</td>`;
+      } else driverCell = `<td style="color:var(--border)">–</td>`;
+    }
+    html += `<tr class="trend-row${trendDrillCat===r.cat?' sel':''}" title="Klick: Ursachenanalyse" onclick="toggleTrendDrill(${i})">
       <td><div class="cat-cell"><span style="width:9px;height:9px;border-radius:2px;background:${col};flex-shrink:0"></span>${esc(r.cat)}</div></td>
       ${prevCell}<td>${fmt(r.curVal)}</td>${deltaCell}
-      <td style="color:${trendCol};font-weight:500;white-space:nowrap">${trendIcon} ${trendLabel} <span style="color:var(--muted);font-weight:400">(${s.slope>=0?'+':''}${fmt(s.slope)}/Mon.)</span></td></tr>`;
+      <td style="color:${trendCol};font-weight:500;white-space:nowrap">${trendIcon} ${trendLabel} <span style="color:var(--muted);font-weight:400">(${s.slope>=0?'+':''}${fmt(s.slope)}/Mon.)</span></td>${driverCell}</tr>`;
   });
   html += `</tbody></table>`;
   return html;
@@ -2221,6 +2481,145 @@ function setTrendMode(mode, btnEl) {
   const bar = btnEl.closest('.trend-mode-toggle');
   if(bar) bar.querySelectorAll('.trend-mode-btn').forEach(b=>b.classList.toggle('active', b===btnEl));
   renderTrendTable();
+  if(trendDrillCat) renderTrendDrill(trendDrillCat);
+}
+
+// ── Kategorie-Trends: Ursachenanalyse ──
+function toggleTrendDrill(i) {
+  if(!trendMonthData) return;
+  const cat = trendMonthData.order[i];
+  trendDrillCat = trendDrillCat === cat ? null : cat;
+  renderTrendTable();
+  renderTrendDrill(trendDrillCat);
+}
+
+function closeTrendDrill() {
+  trendDrillCat = null;
+  renderTrendTable();
+  renderTrendDrill(null);
+}
+
+function buildTrendDrillHtml(cat, d) {
+  const col = trendMonthData.catColors[cat] || '#888';
+  const sg = v => (v>=0?'+':'')+fmt(v);
+  const nf = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
+  const dCol = v => v>0 ? 'var(--danger)' : 'var(--success)'; // Ausgaben: mehr = schlechter
+  const delta = d.cur - d.base;
+  const pct = d.base > 0 ? delta/d.base*100 : null;
+  const avgCur = d.curN ? d.cur/d.curN : 0;
+  const tdL = 'style="text-align:left;color:var(--text)"';
+
+  let html = `<div class="trend-drill">
+    <div style="display:flex;align-items:center;gap:0.6rem">
+      <span style="width:11px;height:11px;border-radius:3px;background:${col}"></span>
+      <strong style="font-size:1rem;font-weight:500">${esc(cat)} – Ursachenanalyse</strong>
+      <button type="button" onclick="closeTrendDrill()" title="Schließen" style="margin-left:auto;background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer;font-family:inherit">&times;</button>
+    </div>
+    <div class="trend-kpis">
+      <div class="trend-kpi"><small>${esc(d.per.curLabel)}</small><strong>${fmt(d.cur)}</strong><br><span>${nf(d.curN)} Buchung${d.curN===1?'':'en'}${d.curN?' · Ø '+fmt(avgCur):''}</span></div>`;
+  if(d.hasBase) html += `
+      <div class="trend-kpi"><small>${esc(d.baseLabel)}</small><strong>${fmt(d.base)}</strong><br><span>${nf(d.baseN)} Buchung${d.baseN===1?'':'en'}${d.baseN?' · Ø '+fmt(d.base/d.baseN):''}</span></div>
+      <div class="trend-kpi"><small>Veränderung</small><strong style="color:${dCol(delta)}">${sg(delta)}</strong><br><span>${pct===null?'neu':(pct>=0?'+':'')+pct.toFixed(1)+' %'}</span></div>`;
+  html += `
+      <div class="trend-kpi" title="Händler mit Buchungen in mindestens 3 Monaten"><small>Wiederkehrend</small><strong>${fmt(d.recCur)}</strong><br><span>${d.hasBase?'zuvor '+fmt(d.recBase):'&nbsp;'}</span></div>
+      <div class="trend-kpi" title="Alle übrigen Händler"><small>Einmalig / variabel</small><strong>${fmt(d.cur-d.recCur)}</strong><br><span>${d.hasBase?'zuvor '+fmt(d.base-d.recBase):'&nbsp;'}</span></div>
+    </div>`;
+
+  // Treiber nach Händler
+  const MAX_ROWS = 8;
+  if(d.hasBase) {
+    const sortedRows = [...d.rows].filter(e=>e.cur||e.base).sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta));
+    const shown = sortedRows.slice(0, MAX_ROWS), rest = sortedRows.slice(MAX_ROWS);
+    const share = v => Math.abs(delta) >= 0.5 ? (v/delta*100).toFixed(0)+' %' : '–';
+    const tag = e => e.base===0 ? 'neu' : e.cur===0 ? 'weggefallen' : e.delta>0 ? 'mehr' : 'weniger';
+    html += `<h4>Treiber nach Händler</h4>
+    <div style="overflow-x:auto"><table class="total-table" style="margin-top:0.25rem"><thead><tr><th>Händler</th><th>${esc(d.baseLabel)}</th><th>${esc(d.per.curLabel)}</th><th>Δ</th><th>Anteil am Δ</th><th>Art</th></tr></thead><tbody>`;
+    shown.forEach(e => {
+      html += `<tr><td ${tdL}>${esc(e.name)}${e.recurring?' <span class="badge" style="background:var(--accent-light);color:var(--accent)" title="Buchungen in mindestens 3 Monaten">wiederkehrend</span>':''}</td>
+        <td>${e.base?fmt(e.base):'–'}</td><td>${e.cur?fmt(e.cur):'–'}</td>
+        <td style="color:${dCol(e.delta)};font-weight:500">${sg(e.delta)}</td><td>${share(e.delta)}</td><td style="color:${dCol(e.delta)}">${tag(e)}</td></tr>`;
+    });
+    if(rest.length) {
+      const rb = rest.reduce((s,e)=>s+e.base,0), rc = rest.reduce((s,e)=>s+e.cur,0);
+      html += `<tr><td ${tdL}>Sonstige (${rest.length} Händler)</td><td>${fmt(rb)}</td><td>${fmt(rc)}</td><td style="color:${dCol(rc-rb)}">${sg(rc-rb)}</td><td>${share(rc-rb)}</td><td></td></tr>`;
+    }
+    html += `<tr style="font-weight:600"><td ${tdL}>Summe</td><td>${fmt(d.base)}</td><td>${fmt(d.cur)}</td><td style="color:${dCol(delta)}">${sg(delta)}</td><td>${Math.abs(delta)>=0.5?'100 %':'–'}</td><td></td></tr>
+    </tbody></table></div>`;
+
+    // Menge vs. Preis
+    if(d.baseN > 0) {
+      const avgBase = d.base/d.baseN;
+      const mengeEff = (d.curN - d.baseN)*avgBase;
+      const preisEff = (avgCur - avgBase)*d.curN;
+      const dominant = Math.abs(mengeEff) >= Math.abs(preisEff) ? 'der Anzahl der Buchungen' : 'der Höhe der einzelnen Beträge';
+      html += `<h4>Menge oder Preis?</h4>
+      <div class="trend-kpis" style="margin-top:0.5rem">
+        <div class="trend-kpi"><small>Anzahl Buchungen</small><strong style="color:${dCol(mengeEff)}">${sg(mengeEff)}</strong><br><span>${nf(d.baseN)} → ${nf(d.curN)}</span></div>
+        <div class="trend-kpi"><small>Ø Betrag je Buchung</small><strong style="color:${dCol(preisEff)}">${sg(preisEff)}</strong><br><span>${fmt(avgBase)} → ${d.curN?fmt(avgCur):'–'}</span></div>
+      </div>
+      ${Math.abs(delta) >= 0.5 ? `<div style="font-size:0.78rem;color:var(--muted)">Die Veränderung kommt überwiegend aus ${dominant}.${d.scale!==1?' Buchungszahlen der Basis sind auf die Länge des aktuellen Zeitraums hochgerechnet.':''}</div>` : ''}`;
+    }
+  } else {
+    const sortedRows = [...d.rows].filter(e=>e.cur).sort((a,b)=>b.cur-a.cur);
+    html += `<h4>Händler im Zeitraum</h4>
+    <div style="font-size:0.78rem;color:var(--muted)">Kein Vergleichszeitraum verfügbar – es werden nur die Anteile gezeigt.</div>
+    <div style="overflow-x:auto"><table class="total-table" style="margin-top:0.25rem"><thead><tr><th>Händler</th><th>${esc(d.per.curLabel)}</th><th>Anteil</th></tr></thead><tbody>`;
+    sortedRows.slice(0, MAX_ROWS).forEach(e => {
+      html += `<tr><td ${tdL}>${esc(e.name)}</td><td>${fmt(e.cur)}</td><td>${d.cur?(e.cur/d.cur*100).toFixed(0)+' %':'–'}</td></tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+
+  // Größte Einzelbuchungen im aktuellen Zeitraum
+  const curSet = new Set(d.per.curMonths);
+  const big = trendMonthData.catTx[cat].filter(tx=>curSet.has(tx.monthKey)).sort((a,b)=>b.absAmt-a.absAmt).slice(0,5);
+  if(big.length) {
+    html += `<h4>Größte Einzelbuchungen (${esc(d.per.curLabel)})</h4>
+    <div style="overflow-x:auto"><table class="total-table" style="margin-top:0.25rem"><tbody>`;
+    big.forEach(tx => {
+      html += `<tr><td style="white-space:nowrap">${tx.date.toLocaleDateString('de-DE')}</td>
+        <td ${tdL}>${esc((tx.payee||tx.desc||'').substring(0,40))}<span style="color:var(--muted)"> ${esc((tx.purpose||'').substring(0,50))}</span>${tx.accrual&&abgrenzungAktiv?' <span class="badge" style="background:var(--amber-light);color:var(--amber)" title="Anteil einer mehrmonatigen Zahlung (Abgrenzung)">Anteil</span>':''}</td>
+        <td>${fmt(tx.absAmt)}</td></tr>`;
+    });
+    html += `</tbody></table></div>`;
+  }
+
+  html += `<h4>Verlauf nach Händler</h4>
+    <div style="position:relative;height:240px;margin-top:0.5rem"><canvas id="chart_trend_drill" role="img" aria-label="Monatsverlauf der Kategorie nach Händler"></canvas></div>
+  </div>`;
+  return html;
+}
+
+function renderTrendDrill(cat) {
+  const wrap = document.getElementById('trendDrillWrap');
+  if(!wrap) return;
+  if(chartInstances['chart_trend_drill']) { chartInstances['chart_trend_drill'].destroy(); delete chartInstances['chart_trend_drill']; }
+  const d = cat && trendMonthData?.catTx[cat] ? trendDriverData(cat, trendMode) : null;
+  if(!d) { trendDrillCat = null; wrap.innerHTML = ''; return; }
+  wrap.innerHTML = buildTrendDrillHtml(cat, d);
+
+  // Gestapelter Monatsverlauf: Top-6-Händler der Kategorie + Rest
+  const { sorted, catTx } = trendMonthData;
+  const totals = new Map();
+  catTx[cat].forEach(tx => { const k = payeeKey(tx); totals.set(k, (totals.get(k)||0)+tx.absAmt); });
+  const topKeys = [...totals.entries()].sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k])=>k);
+  const topSet = new Set(topKeys);
+  const series = new Map([...topKeys, '__rest'].map(k=>[k, {}]));
+  catTx[cat].forEach(tx => {
+    const k = topSet.has(payeeKey(tx)) ? payeeKey(tx) : '__rest';
+    series.get(k)[tx.monthKey] = (series.get(k)[tx.monthKey]||0) + tx.absAmt;
+  });
+  const datasets = topKeys.map((k,i) => ({ label: d.names.get(k)||k, data: sorted.map(mk=>series.get(k)[mk]||0), backgroundColor: COLORS[i%COLORS.length] }));
+  if(totals.size > topKeys.length) datasets.push({ label:'Sonstige', data: sorted.map(mk=>series.get('__rest')[mk]||0), backgroundColor:'#888' });
+  const ctx = document.getElementById('chart_trend_drill');
+  if(ctx) chartInstances['chart_trend_drill'] = new Chart(ctx, {
+    type:'bar',
+    data:{ labels: sorted.map(trendMonthLabel), datasets },
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, font:{ size:10 } } },
+        tooltip:{ callbacks:{ label:c=>`${c.dataset.label}: ${fmt(c.parsed.y)}` } } },
+      scales:{ x:{ stacked:true, ticks:{ autoSkip:false, maxRotation:45 } }, y:{ stacked:true, ticks:{ callback:v=>fmt(v) } } } }
+  });
 }
 
 // ── Kategorie-Trends: Sichtbarkeits-Picker ──
@@ -2912,8 +3311,10 @@ function toggleYear(yr) {
 
 renderCatGrid();
 renderIncCatGrid();
+snapshotCats();
 document.getElementById('excludeKw').value = loadExclude();
 loadZeitraum();
+abgrenzungAktiv = loadAbgrenzung();
 window.addEventListener('beforeunload', () => {
   saveCats(); saveIncCats(); saveExclude(); saveZeitraum();
   if (sqlDb && _dbSaveTimer) { clearTimeout(_dbSaveTimer); saveDbToFile(); }
